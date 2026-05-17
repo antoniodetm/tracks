@@ -1,77 +1,49 @@
-const CACHE_NAME = 'visor-rutas-v2'; // Incrementamos la versión para actualizar cachés viejas
+const CACHE_NAME = 'visor-gira-v1';
 const ASSETS = [
   './',
   './index.html',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/leaflet-gpx/1.7.0/gpx.min.js'
+  'https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.css',
+  'https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/togeojson/0.16.0/togeojson.min.js'
 ];
 
-// 1. Fase de Instalación: Se guarda el esqueleto básico de la App en la memoria del iPhone
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      return cache.addAll(ASSETS);
-    })
+    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
   );
   self.skipWaiting();
 });
 
-// 2. Fase de Activación: Se eliminan cachés de versiones anteriores de la app si existieran
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys => {
-      return Promise.all(
-        keys.map(key => {
-          if (key !== CACHE_NAME) return caches.delete(key);
-        })
-      );
-    })
+    caches.keys().then(keys => Promise.all(keys.map(k => { if (k !== CACHE_NAME) return caches.delete(k); })))
   );
   self.clients.claim();
 });
 
-// 3. Interceptación de Peticiones (El núcleo Offline)
 self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request).then(cachedResponse => {
-      
-      // Si el recurso ya se encuentra guardado en la memoria caché
+      const url = event.request.url;
+      const esMapa = url.includes('opentopomap.org') || url.includes('arcgisonline.com');
+
       if (cachedResponse) {
-        
-        // Estrategia: Si la petición corresponde a imágenes de mapas (OpenTopoMap o Esri Satélite)
-        if (event.request.url.includes('.tile.opentopomap.org') || event.request.url.includes('server.arcgisonline.com')) {
-          // Intentamos descargar la versión más reciente en segundo plano por si ha cambiado algo
-          fetch(event.request).then(networkResponse => {
-            if (networkResponse.status === 200) {
-              caches.open(CACHE_NAME).then(cache => cache.put(event.request, networkResponse));
-            }
-          }).catch(() => {}); // Si falla (estás en la montaña sin cobertura), se ignora el error silenciosamente
+        if (esMapa) {
+          fetch(event.request).then(netRes => {
+            if (netRes.status === 200) caches.open(CACHE_NAME).then(c => c.put(event.request, netRes));
+          }).catch(() => {});
         }
-        
-        return cachedResponse; // Devolvemos inmediatamente la imagen que tenemos en memoria
+        return cachedResponse;
       }
 
-      // Si el recurso NO está en caché, lo solicitamos a internet de manera normal
-      return fetch(event.request).then(networkResponse => {
-        // Si no es una respuesta válida, la devolvemos tal cual
-        if (!networkResponse || networkResponse.status !== 200) {
-          return networkResponse;
+      return fetch(event.request).then(netRes => {
+        if (!netRes || netRes.status !== 200) return netRes;
+        if (esMapa) {
+          const resClone = netRes.clone();
+          caches.open(CACHE_NAME).then(c => c.put(event.request, resClone));
         }
-        
-        // Si es una petición válida y pertenece a uno de nuestros proveedores de mapas, la clonamos y la guardamos
-        if (event.request.url.includes('.tile.opentopomap.org') || event.request.url.includes('server.arcgisonline.com')) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then(cache => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        
-        return networkResponse;
-      }).catch(err => {
-        // Si no hay internet y no estaba guardado previamente, devolverá un espacio vacío en el mapa
-        return null;
-      });
+        return netRes;
+      }).catch(() => null);
     })
   );
 });

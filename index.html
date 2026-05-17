@@ -3,71 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Visor GPX con Satélite</title>
+    <title>GPS Orientado</title>
     
+    <!-- Configuración PWA para iPhone -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="manifest" href="data:application/manifest+json,{%22name%22:%22Visor%20GPX%20Sat%22,%22short_name%22:%22VisorGPX%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22}")>
+    <link rel="manifest" href="data:application/manifest+json,{%22name%22:%22GPS%20Giro%22,%22short_name%22:%22GPSGiro%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22}")>
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- MapLibre GL JS (Reemplaza a Leaflet para permitir rotación) -->
+    <link href="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.css" rel="stylesheet" />
     
     <style>
         body, html { 
-            margin: 0; 
-            padding: 0; 
-            height: 100%; 
-            width: 100%; 
-            overflow: hidden; 
-            font-family: -apple-system, system-ui, sans-serif; 
-            background-color: #000;
+            margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; 
+            font-family: -apple-system, system-ui, sans-serif; background-color: #000;
         }
-        #map { 
-            height: 100%; 
-            width: 100%; 
-            z-index: 1; 
-        }
+        #map { height: 100%; width: 100%; }
         
-        /* Panel de botones flotantes estilo iOS */
+        /* Panel de botones estilo iOS */
         .panel-botones {
-            position: absolute;
-            bottom: 30px;
-            right: 20px;
-            z-index: 1000;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
+            position: absolute; bottom: 30px; right: 20px; z-index: 10;
+            display: flex; flex-direction: column; gap: 15px;
         }
         .btn-ios {
-            background: rgba(255, 255, 255, 0.95);
-            -webkit-backdrop-filter: blur(10px);
-            backdrop-filter: blur(10px);
-            border: none;
-            border-radius: 50%;
-            box-shadow: 0px 4px 12px rgba(0,0,0,0.35);
-            font-size: 24px;
-            width: 55px;
-            height: 55px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: transform 0.1s ease;
+            background: rgba(255, 255, 255, 0.95); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+            border: none; border-radius: 50%; box-shadow: 0px 4px 12px rgba(0,0,0,0.35);
+            font-size: 24px; width: 55px; height: 55px; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: transform 0.1s ease;
         }
-        .btn-ios:active { 
-            transform: scale(0.92);
-            background: #e5e5e5; 
-        }
-        #file-input { 
-            display: none; 
-        }
+        .btn-ios:active { transform: scale(0.92); }
+        .btn-activo { background: #007aff !important; color: white !important; }
+        #file-input { display: none; }
         
-        /* Personalización sutil del selector de capas nativo de Leaflet */
-        .leaflet-control-layers {
-            border-radius: 12px !important;
-            box-shadow: 0px 4px 12px rgba(0,0,0,0.2) !important;
-            border: none !important;
-            font-size: 14px;
-            padding: 6px 10px !important;
+        /* La flecha del GPS diseñada con CSS puro */
+        .gpx-flecha-usuario {
+            width: 0; height: 0;
+            border-left: 12px solid transparent;
+            border-right: 12px solid transparent;
+            border-bottom: 28px solid #007aff; /* Azul Apple */
+            filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.4));
+            transition: transform 0.1s linear; /* Suaviza el giro de la flecha */
         }
     </style>
 </head>
@@ -76,109 +51,164 @@
     <div id="map"></div>
     
     <div class="panel-botones">
+        <!-- Botón Cambiar Capa (Topográfico / Satélite) -->
+        <button class="btn-ios" id="btn-capa" onclick="alternarCapa()">🗺️</button>
+        <!-- Botón Cargar GPX -->
         <label for="file-input" class="btn-ios">📂</label>
         <input type="file" id="file-input" accept=".gpx">
-        
-        <button class="btn-ios" onclick="localizarUsuario()">📍</button>
+        <!-- Botón Modo Brújula / Rotación de marcha -->
+        <button class="btn-ios" id="btn-brujula" onclick="conmutarModoSeguimiento()">🧭</button>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-gpx/1.7.0/gpx.min.js"></script>
+    <!-- Librerías de MapLibre y un parser de GPX ligero -->
+    <script src="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/togeojson/0.16.0/togeojson.min.js"></script>
 
     <script>
-        // 1. Inicializar las dos capas de mapa base disponibles
-        const mapaTopografico = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-            maxZoom: 17,
-            attribution: '© OpenTopoMap'
-        });
-
-        const fotoAerea = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            maxZoom: 18,
-            attribution: 'Tiles © Esri'
-        });
-
-        // 2. Inicializar el mapa con el Topográfico activado por defecto
-        const map = L.map('map', { 
-            zoomControl: false,
-            layers: [mapaTopografico] 
-        }).setView([40.4167, -3.7037], 6);
-
-        // 3. Crear y añadir el control para alternar capas en la esquina superior derecha
-        const mapasBase = {
-            "Mapa de Montaña": mapaTopografico,
-            "Foto Aérea (Satélite)": fotoAerea
+        // 1. Configurar los estilos de mapa (Servidores libres en formato MapLibre)
+        const capaTopografica = {
+            "version": 8,
+            "sources": { "topo": { "type": "raster", "tiles": ["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"], "tileSize": 256, "attribution": "© OpenTopoMap" }},
+            "layers": [{ "id": "topo-layer", "type": "raster", "source": "topo" }]
         };
-        L.control.layers(mapasBase, null, { position: 'topright' }).addTo(map);
 
-        let rutaActual = null;
+        const capaSatelite = {
+            "version": 8,
+            "sources": { "sat": { "type": "raster", "tiles": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"], "tileSize": 256, "attribution": "© Esri" }},
+            "layers": [{ "id": "sat-layer", "type": "raster", "source": "sat" }]
+        };
 
-        // 4. Lector de archivos GPX desde el almacenamiento del iPhone
+        // Inicializar el mapa
+        let capaActual = 'topo';
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: capaTopografica,
+            center: [-3.7037, 40.4167],
+            zoom: 6,
+            maxZoom: 17
+        });
+
+        // Alternar capas entre satélite y topo
+        function alternarCapa() {
+            capaActual = (capaActual === 'topo') ? 'sat' : 'topo';
+            map.setStyle(capaActual === 'topo' ? capaTopografica : capaSatelite);
+            document.getElementById('btn-capa').innerText = (capaActual === 'topo') ? '🗺️' : '🛰️';
+        }
+
+        // 2. Crear el marcador de FLECHA para el usuario
+        const elFlecha = document.createElement('div');
+        elFlecha.className = 'gpx-flecha-usuario';
+        
+        const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'map' })
+            .setLngLat([0, 0])
+            .addTo(map);
+
+        // Variables de estado del GPS y rumbo
+        let coordenadasUsuario = null;
+        let rumboActual = 0;
+        let modoSeguimiento = 0; // 0: Apagado, 1: Centrar GPS, 2: Girar mapa con la marcha
+
+        function conmutarModoSeguimiento() {
+            modoSeguimiento = (modoSeguimiento + 1) % 3;
+            const btn = document.getElementById('btn-brujula');
+            
+            if (modoSeguimiento === 0) {
+                btn.innerText = "🧭"; btn.classList.remove('btn-activo');
+                map.setBearing(0); // Resetea el mapa apuntando al Norte
+            } else if (modoSeguimiento === 1) {
+                btn.innerText = "📍"; btn.classList.add('btn-activo');
+                if (coordenadasUsuario) map.flyTo({ center: coordenadasUsuario, zoom: 15 });
+            } else if (modoSeguimiento === 2) {
+                btn.innerText = "🏃‍♂️"; btn.classList.add('btn-activo');
+                solicitarPermisoOrientacion(); // Activa la brújula en iPhone
+            }
+        }
+
+        // 3. Activar GPS continuo del iPhone
+        navigator.geolocation.watchPosition(function(pos) {
+            coordenadasUsuario = [pos.coords.longitude, pos.coords.latitude];
+            marcadorUsuario.setLngLat(coordenadasUsuario);
+
+            // Si el iPhone calcula rumbo por movimiento del GPS, lo usamos
+            if (pos.coords.heading !== null && !isNaN(pos.coords.heading)) {
+                rumboActual = pos.coords.heading;
+                actualizarOrientacion();
+            }
+
+            if (modoSeguimiento >= 1) {
+                map.setCenter(coordenadasUsuario);
+            }
+        }, function() {}, { enableHighAccuracy: true });
+
+        // 4. Capturar la Brújula del iPhone (API de Apple)
+        function solicitarPermisoOrientacion() {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                // Obligatorio en iOS modernos pedir permiso explícito
+                DeviceOrientationEvent.requestPermission()
+                    .then(response => {
+                        if (response === 'granted') {
+                            window.addEventListener('deviceorientation', manejarOrientacion, true);
+                        }
+                    }).catch(console.error);
+            } else {
+                window.addEventListener('deviceorientation', manejarOrientacion, true);
+            }
+        }
+
+        function manejarOrientacion(event) {
+            // El iPhone usa webkitCompassHeading para la brújula real corregida
+            let rumbo = event.webkitCompassHeading || event.alpha;
+            if (rumbo !== null && rumbo !== undefined) {
+                rumboActual = rumbo;
+                actualizarOrientacion();
+            }
+        }
+
+        function actualizarOrientacion() {
+            if (modoSeguimiento === 2) {
+                // MODO MARCHA: La flecha mira siempre hacia adelante de la pantalla y el MAPA gira al revés
+                marcadorUsuario.setRotation(0);
+                map.setBearing(-rumboActual); 
+            } else {
+                // MODO NORMAL: El mapa mira al Norte, la flecha gira según tu orientación
+                marcadorUsuario.setRotation(rumboActual);
+            }
+        }
+
+        // 5. Lector de archivos GPX
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
             reader.onload = function(evt) {
-                const gpxData = evt.target.result;
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(evt.target.result, "text/xml");
+                const geojson = toGeoJSON.gpx(xmlDoc); // Convierte GPX a GeoJSON dinámicamente
 
-                // Si ya había una ruta cargada en pantalla, la eliminamos
-                if (rutaActual) map.removeLayer(rutaActual);
+                // Eliminar ruta anterior si existe
+                if (map.getLayer('ruta-linea')) map.removeLayer('ruta-linea');
+                if (map.getSource('ruta')) map.removeSource('ruta');
 
-                // Dibujar el nuevo track GPX
-                rutaActual = new L.GPX(gpxData, {
-                    async: true,
-                    polyline_options: {
-                        color: '#ff3b30', // Rojo iOS
-                        weight: 5,
-                        opacity: 0.85
-                    },
-                    marker_options: {
-                        startIconUrl: null, // Desactivados para evitar problemas de carga sin cobertura
-                        endIconUrl: null,
-                        shadowUrl: null
-                    }
-                }).on('loaded', function(e) {
-                    map.fitBounds(e.target.getBounds()); // Auto-zoom para encuadrar la ruta completa
-                }).addTo(map);
+                // Añadir la ruta al mapa vectorial
+                map.addSource('ruta', { type: 'geojson', data: geojson });
+                map.addLayer({
+                    'id': 'ruta-linea', 'type': 'line', 'source': 'ruta',
+                    'layout': { 'line-join': 'round', 'line-cap': 'round' },
+                    'paint': { 'line-color': '#ff3b30', 'line-width': 5, 'line-opacity': 0.85 }
+                });
+
+                // Auto-encuadrar la ruta
+                const coordinates = geojson.features[0].geometry.coordinates;
+                const bounds = coordinates.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
+                map.fitBounds(bounds, { padding: 40 });
             };
             reader.readAsText(file);
         });
 
-        // 5. Función de geolocalización GPS en tiempo real
-        let userMarker;
-        function localizarUsuario() {
-            if (!navigator.geolocation) return alert("El GPS no está disponible en este dispositivo");
-            
-            navigator.geolocation.getCurrentPosition(function(pos) {
-                const lat = pos.coords.latitude;
-                const lng = pos.coords.longitude;
-                
-                if (userMarker) {
-                    userMarker.setLatLng([lat, lng]);
-                } else {
-                    userMarker = L.circleMarker([lat, lng], { 
-                        radius: 9, 
-                        fillColor: '#007aff', // Azul GPS Apple
-                        color: 'white', 
-                        weight: 2, 
-                        fillOpacity: 1 
-                    }).addTo(map);
-                }
-                map.setView([lat, lng], 15);
-            }, function(err) { 
-                alert("Error al obtener la ubicación. Asegúrate de dar permisos de GPS a Safari."); 
-            }, { 
-                enableHighAccuracy: true // Obliga al iPhone a usar el GPS real de alta precisión
-            });
-        }
-
-        // 6. Registro del Service Worker para funcionamiento Offline
+        // 6. Registro del Service Worker
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js')
-                    .then(reg => console.log('Service Worker registrado correctamente', reg))
-                    .catch(err => console.error('Error al registrar el Service Worker', err));
-            });
+            window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js'); });
         }
     </script>
 </body>
