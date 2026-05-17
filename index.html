@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mi Visor de Rutas</title>
+    
+    <!-- Optimización para iPhone (Modo App) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- CSS de Leaflet (Mapas) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        /* Hacer que el mapa ocupe toda la pantalla del iPhone */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        #map {
+            height: 100%;
+            width: 100%;
+            z-index: 1;
+        }
+        /* Botón flotante estilo iOS */
+        .btn-gps {
+            position: absolute;
+            bottom: 30px;
+            right: 20px;
+            z-index: 1000;
+            background: white;
+            border: none;
+            padding: 15px;
+            border-radius: 50%;
+            box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
+            font-size: 20px;
+            width: 55px;
+            height: 55px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-gps:active {
+            background: #e5e5e5;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+    <button class="btn-gps" onclick="localizarUsuario()">📍</button>
+
+    <!-- JS de Leaflet -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // 1. Inicializar el mapa centrado (ejemplo: Madrid)
+        const map = L.map('map', {
+            zoomControl: false // Ocultamos los botones + / - para que parezca más una App
+        }).setView([40.416775, -3.703790], 13);
+
+        // 2. Añadir capa de mapa de montaña (OpenTopoMap)
+        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            maxZoom: 17,
+            attribution: 'Map data: © OpenStreetMap, SRTM | Map style: © OpenTopoMap'
+        }).addTo(map);
+
+        // 3. RUTA DE EJEMPLO (Coordenadas ficticias: Latitud, Longitud)
+        // En el futuro, aquí parsearás tu archivo GPX
+        const coordenadasRuta = [
+            [40.416775, -3.703790],
+            [40.419000, -3.701000],
+            [40.422000, -3.702000],
+            [40.425000, -3.698000]
+        ];
+
+        // Pintar la ruta en color rojo y gruesa para que se vea bien en el campo
+        const rutaCompleta = L.polyline(coordenadasRuta, {
+            color: '#ff3b30', // Rojo estilo iOS
+            weight: 5,
+            opacity: 0.8
+        }).addTo(map);
+
+        // Ajustar el mapa automáticamente para que se vea la ruta entera
+        map.fitBounds(rutaCompleta.getBounds());
+
+        // Marcar Inicio y Fin
+        L.marker(coordenadasRuta[0]).addTo(map).bindPopup("Inicio de la ruta");
+        L.marker(coordenadasRuta[coordenadasRuta.length - 1]).addTo(map).bindPopup("Fin de la ruta");
+
+        // 4. FUNCIÓN GPS PARA EL IPHONE
+        let userMarker;
+        function localizarUsuario() {
+            if (!navigator.geolocation) {
+                alert("Tu navegador no soporta GPS");
+                return;
+            }
+
+            // Activa el GPS del iPhone
+            navigator.geolocation.getCurrentPosition(function(position) {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+
+                // Si ya existe el marcador de posición, lo movemos; si no, lo creamos
+                if (userMarker) {
+                    userMarker.setLatLng([lat, lng]);
+                } else {
+                    userMarker = L.circleMarker([lat, lng], {
+                        radius: 8,
+                        fillColor: '#007aff', // Azul GPS de Apple
+                        color: 'white',
+                        weight: 2,
+                        fillOpacity: 1
+                    }).addTo(map).bindPopup("Estás aquí");
+                }
+                
+                // Centrar el mapa en el usuario con un zoom cercano
+                map.setView([lat, lng], 15);
+            }, function(error) {
+                alert("Error al obtener la ubicación: " + error.message);
+            }, {
+                enableHighAccuracy: true // Fuerza al iPhone a usar el GPS de alta precisión, no solo Wifi
+            });
+        }
+    </script>
+</body>
+</html>
