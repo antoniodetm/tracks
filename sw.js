@@ -1,4 +1,4 @@
-const CACHE_NAME = 'visor-rutas-v1';
+const CACHE_NAME = 'visor-rutas-v2'; // Incrementamos la versión para actualizar cachés viejas
 const ASSETS = [
   './',
   './index.html',
@@ -7,7 +7,7 @@ const ASSETS = [
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet-gpx/1.7.0/gpx.min.js'
 ];
 
-// Instalar el Service Worker y guardar la estructura básica en caché
+// 1. Fase de Instalación: Se guarda el esqueleto básico de la App en la memoria del iPhone
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
@@ -17,7 +17,7 @@ self.addEventListener('install', event => {
   self.skipWaiting();
 });
 
-// Activar el SW y limpiar cachés antiguas si las hubiera
+// 2. Fase de Activación: Se eliminan cachés de versiones anteriores de la app si existieran
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys => {
@@ -31,35 +31,45 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
-// Interceptar las peticiones de internet
+// 3. Interceptación de Peticiones (El núcleo Offline)
 self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request).then(cachedResponse => {
-      // Si el archivo ya está en la caché (como la estructura de la web o un mapa ya visto), lo devuelve
+      
+      // Si el recurso ya se encuentra guardado en la memoria caché
       if (cachedResponse) {
-        // Estrategia "Cache first, network fallback": Si es una imagen de mapa (.png), la servimos y además la actualizamos de fondo
-        if (event.request.url.includes('.tile.opentopomap.org')) {
+        
+        // Estrategia: Si la petición corresponde a imágenes de mapas (OpenTopoMap o Esri Satélite)
+        if (event.request.url.includes('.tile.opentopomap.org') || event.request.url.includes('server.arcgisonline.com')) {
+          // Intentamos descargar la versión más reciente en segundo plano por si ha cambiado algo
           fetch(event.request).then(networkResponse => {
             if (networkResponse.status === 200) {
               caches.open(CACHE_NAME).then(cache => cache.put(event.request, networkResponse));
             }
-          }).catch(() => {}); // Ignorar errores de red en la montaña
+          }).catch(() => {}); // Si falla (estás en la montaña sin cobertura), se ignora el error silenciosamente
         }
-        return cachedResponse;
+        
+        return cachedResponse; // Devolvemos inmediatamente la imagen que tenemos en memoria
       }
 
-      // Si no está en caché, va a internet. Si es una imagen de mapa, la guarda en caché para la próxima vez
+      // Si el recurso NO está en caché, lo solicitamos a internet de manera normal
       return fetch(event.request).then(networkResponse => {
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic' && !event.request.url.includes('.tile.opentopomap.org')) {
+        // Si no es una respuesta válida, la devolvemos tal cual
+        if (!networkResponse || networkResponse.status !== 200) {
           return networkResponse;
         }
-        const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME).then(cache => {
-          cache.put(event.request, responseToCache);
-        });
+        
+        // Si es una petición válida y pertenece a uno de nuestros proveedores de mapas, la clonamos y la guardamos
+        if (event.request.url.includes('.tile.opentopomap.org') || event.request.url.includes('server.arcgisonline.com')) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        
         return networkResponse;
       }).catch(err => {
-        // Si falla internet y no está en caché, no podemos hacer nada (mostrará recuadro gris en el mapa)
+        // Si no hay internet y no estaba guardado previamente, devolverá un espacio vacío en el mapa
         return null;
       });
     })
