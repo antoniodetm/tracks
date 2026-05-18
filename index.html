@@ -5,12 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>GPS Orientado</title>
     
-    <!-- Configuración PWA para iPhone -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="manifest" href="data:application/manifest+json,{%22name%22:%22GPS%20Giro%22,%22short_name%22:%22GPSGiro%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22}")>
+    <link rel="manifest" href="data:application/manifest+json,{%22name%22:%22GPS%20Giro%22,%22short_name%22:%22GPSGiro%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22}">
 
-    <!-- MapLibre GL JS (Reemplaza a Leaflet para permitir rotación) -->
     <link href="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.css" rel="stylesheet" />
     
     <style>
@@ -35,128 +33,169 @@
         .btn-activo { background: #007aff !important; color: white !important; }
         #file-input { display: none; }
         
-        /* La flecha del GPS diseñada con CSS puro */
+        /* Contenedor del Perfil de Altitud */
+        .panel-altitud {
+            position: absolute; top: -100%; left: 0; width: 100%; height: 220px;
+            background: rgba(255, 255, 255, 0.95); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+            z-index: 15; border-bottom: 1px solid rgba(0,0,0,0.1);
+            transition: top 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            padding: 15px; box-sizing: border-box;
+            display: flex; flex-direction: column;
+        }
+        .panel-altitud.abierto { top: 0; }
+        .contenedor-grafico { flex-grow: 1; position: relative; width: 100%; height: 100%; }
+
+        /* Flecha GPS en CSS */
         .gpx-flecha-usuario {
             width: 0; height: 0;
             border-left: 12px solid transparent;
             border-right: 12px solid transparent;
-            border-bottom: 28px solid #007aff; /* Azul Apple */
+            border-bottom: 28px solid #007aff;
             filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.4));
-            transition: transform 0.1s linear; /* Suaviza el giro de la flecha */
+            transition: transform 0.1s linear;
         }
     </style>
 </head>
 <body>
 
+    <div id="panel-altitud" class="panel-altitud">
+        <div class="contenedor-grafico">
+            <canvas id="graficoAltitud"></canvas>
+        </div>
+    </div>
+
     <div id="map"></div>
     
     <div class="panel-botones">
-        <!-- Botón Cambiar Capa (Topográfico / Satélite) -->
-        <button class="btn-ios" id="btn-capa" onclick="alternarCapa()">🗺️</button>
-        <!-- Botón Cargar GPX -->
+        <button class="btn-ios" id="btn-capa" onclick="alternarCapa()">⛰️</button>
+        <button class="btn-ios" id="btn-altitud" onclick="alternarPanelAltitud()">📊</button>
         <label for="file-input" class="btn-ios">📂</label>
         <input type="file" id="file-input" accept=".gpx">
-        <!-- Botón Modo Brújula / Rotación de marcha -->
         <button class="btn-ios" id="btn-brujula" onclick="conmutarModoSeguimiento()">🧭</button>
     </div>
 
-    <!-- Librerías de MapLibre y un parser de GPX ligero -->
     <script src="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/togeojson/0.16.0/togeojson.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <script>
-        // 1. Configurar los estilos de mapa (Servidores libres en formato MapLibre)
-        const capaTopografica = {
-            "version": 8,
-            "sources": { "topo": { "type": "raster", "tiles": ["https://a.tile.opentopomap.org/{z}/{x}/{y}.png"], "tileSize": 256, "attribution": "© OpenTopoMap" }},
-            "layers": [{ "id": "topo-layer", "type": "raster", "source": "topo" }]
-        };
-
-        const capaSatelite = {
-            "version": 8,
-            "sources": { "sat": { "type": "raster", "tiles": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"], "tileSize": 256, "attribution": "© Esri" }},
-            "layers": [{ "id": "sat-layer", "type": "raster", "source": "sat" }]
-        };
-
-        // Inicializar el mapa
+        // Estado de la aplicación
         let capaActual = 'topo';
+        let coordenadasUsuario = null;
+        let rumboActual = 0;
+        let modoSeguimiento = 0; 
+        let gpxGeojsonData = null; 
+        
+        // Datos de altitud procesados
+        let datosPerfil = []; 
+        let miGrafico = null;
+
+        const mapaBaseEstilo = { "version": 8, "sources": {}, "layers": [] };
+
         const map = new maplibregl.Map({
             container: 'map',
-            style: capaTopografica,
+            style: mapaBaseEstilo,
             center: [-3.7037, 40.4167],
             zoom: 6,
             maxZoom: 17
         });
 
-        // Alternar capas entre satélite y topo
+        map.on('load', () => {
+            map.addSource('topo-source', {
+                "type": "raster",
+                "tiles": ["https://tile.opentopomap.org/{z}/{x}/{y}.png"],
+                "tileSize": 256,
+                "attribution": "© OpenTopoMap"
+            });
+            map.addSource('sat-source', {
+                "type": "raster",
+                "tiles": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+                "tileSize": 256,
+                "attribution": "© Esri"
+            });
+
+            map.addLayer({ "id": "sat-layer", "type": "raster", "source": "sat-source" });
+            map.addLayer({ "id": "topo-layer", "type": "raster", "source": "topo-source" });
+            map.setLayoutProperty('sat-layer', 'visibility', 'none');
+
+            marcadorUsuario.addTo(map);
+        });
+
         function alternarCapa() {
-            capaActual = (capaActual === 'topo') ? 'sat' : 'topo';
-            map.setStyle(capaActual === 'topo' ? capaTopografica : capaSatelite);
-            document.getElementById('btn-capa').innerText = (capaActual === 'topo') ? '🗺️' : '🛰️';
+            if (!map.isStyleLoaded()) return;
+            if (capaActual === 'topo') {
+                map.setLayoutProperty('topo-layer', 'visibility', 'none');
+                map.setLayoutProperty('sat-layer', 'visibility', 'visible');
+                capaActual = 'sat';
+                document.getElementById('btn-capa').innerText = '🛰️';
+            } else {
+                map.setLayoutProperty('sat-layer', 'visibility', 'none');
+                map.setLayoutProperty('topo-layer', 'visibility', 'visible');
+                capaActual = 'topo';
+                document.getElementById('btn-capa').innerText = '⛰️';
+            }
         }
 
-        // 2. Crear el marcador de FLECHA para el usuario
+        function alternarPanelAltitud() {
+            const panel = document.getElementById('panel-altitud');
+            const btn = document.getElementById('btn-altitud');
+            panel.classList.toggle('abierto');
+            btn.classList.toggle('btn-activo');
+            
+            // Forzar redibujado correcto del canvas al desplegar
+            setTimeout(() => { if(miGrafico) miGrafico.resize(); }, 150);
+        }
+
         const elFlecha = document.createElement('div');
         elFlecha.className = 'gpx-flecha-usuario';
-        
-        const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'map' })
-            .setLngLat([0, 0])
-            .addTo(map);
-
-        // Variables de estado del GPS y rumbo
-        let coordenadasUsuario = null;
-        let rumboActual = 0;
-        let modoSeguimiento = 0; // 0: Apagado, 1: Centrar GPS, 2: Girar mapa con la marcha
+        const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'map' }).setLngLat([0, 0]);
 
         function conmutarModoSeguimiento() {
             modoSeguimiento = (modoSeguimiento + 1) % 3;
             const btn = document.getElementById('btn-brujula');
-            
             if (modoSeguimiento === 0) {
                 btn.innerText = "🧭"; btn.classList.remove('btn-activo');
-                map.setBearing(0); // Resetea el mapa apuntando al Norte
+                map.setBearing(0); 
             } else if (modoSeguimiento === 1) {
                 btn.innerText = "📍"; btn.classList.add('btn-activo');
-                if (coordenadasUsuario) map.flyTo({ center: coordenadasUsuario, zoom: 15 });
+                if (coordenadasUsuario) map.easeTo({ center: coordenadasUsuario, zoom: 16, duration: 800 });
             } else if (modoSeguimiento === 2) {
                 btn.innerText = "🏃‍♂️"; btn.classList.add('btn-activo');
-                solicitarPermisoOrientacion(); // Activa la brújula en iPhone
+                solicitarPermisoOrientacion(); 
             }
         }
 
-        // 3. Activar GPS continuo del iPhone
+        // MOTOR GPS CON CÁLCULO DE POSICIÓN EN EL GRÁFICO
         navigator.geolocation.watchPosition(function(pos) {
             coordenadasUsuario = [pos.coords.longitude, pos.coords.latitude];
             marcadorUsuario.setLngLat(coordenadasUsuario);
 
-            // Si el iPhone calcula rumbo por movimiento del GPS, lo usamos
             if (pos.coords.heading !== null && !isNaN(pos.coords.heading)) {
                 rumboActual = pos.coords.heading;
                 actualizarOrientacion();
             }
 
             if (modoSeguimiento >= 1) {
-                map.setCenter(coordenadasUsuario);
+                map.easeTo({ center: coordenadasUsuario, duration: 400, essential: true });
             }
-        }, function() {}, { enableHighAccuracy: true });
 
-        // 4. Capturar la Brújula del iPhone (API de Apple)
+            // Si hay un GPX cargado y datos de altitud, actualizar punto en el gráfico
+            if (datosPerfil.length > 0) {
+                actualizarPuntoGrafico(coordenadasUsuario);
+            }
+        }, function(err) { console.error(err); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
+
         function solicitarPermisoOrientacion() {
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                // Obligatorio en iOS modernos pedir permiso explícito
-                DeviceOrientationEvent.requestPermission()
-                    .then(response => {
-                        if (response === 'granted') {
-                            window.addEventListener('deviceorientation', manejarOrientacion, true);
-                        }
-                    }).catch(console.error);
+                DeviceOrientationEvent.requestPermission().then(response => {
+                    if (response === 'granted') window.addEventListener('deviceorientation', manejarOrientacion, true);
+                }).catch(console.error);
             } else {
                 window.addEventListener('deviceorientation', manejarOrientacion, true);
             }
         }
 
         function manejarOrientacion(event) {
-            // El iPhone usa webkitCompassHeading para la brújula real corregida
             let rumbo = event.webkitCompassHeading || event.alpha;
             if (rumbo !== null && rumbo !== undefined) {
                 rumboActual = rumbo;
@@ -166,16 +205,14 @@
 
         function actualizarOrientacion() {
             if (modoSeguimiento === 2) {
-                // MODO MARCHA: La flecha mira siempre hacia adelante de la pantalla y el MAPA gira al revés
                 marcadorUsuario.setRotation(0);
                 map.setBearing(-rumboActual); 
             } else {
-                // MODO NORMAL: El mapa mira al Norte, la flecha gira según tu orientación
                 marcadorUsuario.setRotation(rumboActual);
             }
         }
 
-        // 5. Lector de archivos GPX
+        // Lector de archivos GPX y Procesador de Altitud
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -184,31 +221,134 @@
             reader.onload = function(evt) {
                 const parser = new DOMParser();
                 const xmlDoc = parser.parseFromString(evt.target.result, "text/xml");
-                const geojson = toGeoJSON.gpx(xmlDoc); // Convierte GPX a GeoJSON dinámicamente
+                
+                gpxGeojsonData = toGeoJSON.gpx(xmlDoc); 
+                dibujarRuta(gpxGeojsonData);
+                
+                // Procesar altimetría
+                procesarAltimetria(xmlDoc);
 
-                // Eliminar ruta anterior si existe
-                if (map.getLayer('ruta-linea')) map.removeLayer('ruta-linea');
-                if (map.getSource('ruta')) map.removeSource('ruta');
-
-                // Añadir la ruta al mapa vectorial
-                map.addSource('ruta', { type: 'geojson', data: geojson });
-                map.addLayer({
-                    'id': 'ruta-linea', 'type': 'line', 'source': 'ruta',
-                    'layout': { 'line-join': 'round', 'line-cap': 'round' },
-                    'paint': { 'line-color': '#ff3b30', 'line-width': 5, 'line-opacity': 0.85 }
-                });
-
-                // Auto-encuadrar la ruta
-                const coordinates = geojson.features[0].geometry.coordinates;
+                const coordinates = gpxGeojsonData.features[0].geometry.coordinates;
                 const bounds = coordinates.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
                 map.fitBounds(bounds, { padding: 40 });
             };
             reader.readAsText(file);
         });
 
-        // 6. Registro del Service Worker
+        function dibujarRuta(geoJsonData) {
+            if (map.getLayer('ruta-linea')) map.removeLayer('ruta-linea');
+            if (map.getSource('ruta')) map.removeSource('ruta');
+            map.addSource('ruta', { type: 'geojson', data: geoJsonData });
+            map.addLayer({
+                'id': 'ruta-linea', 'type': 'line', 'source': 'ruta',
+                'layout': { 'line-join': 'round', 'line-cap': 'round' },
+                'paint': { 'line-color': '#0033aa', 'line-width': 5, 'line-opacity': 0.85 }
+            });
+        }
+
+        // FÓRMULA HAIVERSINE (Calcular distancias en la superficie esférica terrestre)
+        function calcularDistanciaKms(lon1, lat1, lon2, lat2) {
+            const R = 6371; // Radio de la Tierra en km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        // Extraer elevación y calcular distancias acumuladas de manera escalonada
+        function procesarAltimetria(xml) {
+            const trkpts = xml.getElementsByTagName("trkpt");
+            datosPerfil = [];
+            let distanciaAcumulada = 0;
+
+            for (let i = 0; i < trkpts.length; i++) {
+                const lat = parseFloat(trkpts[i].getAttribute("lat"));
+                const lon = parseFloat(trkpts[i].getAttribute("lon"));
+                const eleNode = trkpts[i].getElementsByTagName("ele")[0];
+                const altitud = eleNode ? parseFloat(eleNode.textContent) : 0;
+
+                if (i > 0) {
+                    const latPrev = parseFloat(trkpts[i-1].getAttribute("lat"));
+                    const lonPrev = parseFloat(trkpts[i-1].getAttribute("lon"));
+                    distanciaAcumulada += calcularDistanciaKms(lonPrev, latPrev, lon, lat);
+                }
+
+                datosPerfil.push({
+                    x: parseFloat(distanciaAcumulada.toFixed(2)), // Kilómetros
+                    y: Math.round(altitud),                      // Metros
+                    lat: lat,
+                    lon: lon
+                });
+            }
+            inicializarGrafico();
+        }
+
+        // Renderizar el gráfico con Chart.js
+        function inicializarGrafico() {
+            if (miGrafico) miGrafico.destroy();
+
+            const ctx = document.getElementById('graficoAltitud').getContext('2d');
+            
+            miGrafico = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Perfil (m)',
+                        data: datosPerfil,
+                        borderColor: '#007aff',
+                        backgroundColor: 'rgba(0, 122, 255, 0.15)',
+                        borderWidth: 2,
+                        fill: true,
+                        pointRadius: 0,
+                        tension: 0.1
+                    }, {
+                        label: 'Tú',
+                        data: [], // Se llenará dinámicamente con tu posición GPS
+                        borderColor: '#ff3b30',
+                        backgroundColor: '#ff3b30',
+                        pointRadius: 6,
+                        pointHoverRadius: 8,
+                        showLine: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { type: 'linear', title: { display: true, text: 'Distancia (km)', font: { size: 10 } } },
+                        y: { title: { display: true, text: 'Altitud (m)', font: { size: 10 } } }
+                    }
+                }
+            });
+        }
+
+        // Busca el punto del GPX más cercano a tu ubicación real y lo pinta en rojo sobre la gráfica
+        function actualizarPuntoGrafico(coordsGPS) {
+            if (!miGrafico || datosPerfil.length === 0) return;
+
+            let indiceMasCercano = 0;
+            let distanciaMinima = Infinity;
+
+            for (let i = 0; i < datosPerfil.length; i++) {
+                // Cálculo euclidiano simple para encontrar proximidad en coordenadas planas locales
+                const d = Math.pow(datosPerfil[i].lon - coordsGPS[0], 2) + Math.pow(datosPerfil[i].lat - coordsGPS[1], 2);
+                if (d < distanciaMinima) {
+                    distanciaMinima = d;
+                    indiceMasCercano = i;
+                }
+            }
+
+            const puntoRuta = datosPerfil[indiceMasCercano];
+
+            // Actualizar el segundo dataset ("Tú") del gráfico de Chart.js
+            miGrafico.data.datasets[1].data = [{ x: puntoRuta.x, y: puntoRuta.y }];
+            miGrafico.update('none'); // Update sin animaciones pesadas para no consumir batería en ruta
+        }
+
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js'); });
+            window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
         }
     </script>
 </body>
