@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GPS Orientado</title>
+    <title>GPS Orientado Pro</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -18,7 +18,6 @@
         }
         #map { height: 100%; width: 100%; }
         
-        /* Panel de botones estilo iOS */
         .panel-botones {
             position: absolute; bottom: 30px; right: 20px; z-index: 10;
             display: flex; flex-direction: column; gap: 15px;
@@ -33,7 +32,6 @@
         .btn-activo { background: #007aff !important; color: white !important; }
         #file-input { display: none; }
         
-        /* Contenedor del Perfil de Altitud */
         .panel-altitud {
             position: absolute; top: -100%; left: 0; width: 100%; height: 220px;
             background: rgba(255, 255, 255, 0.95); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
@@ -45,7 +43,6 @@
         .panel-altitud.abierto { top: 0; }
         .contenedor-grafico { flex-grow: 1; position: relative; width: 100%; height: 100%; }
 
-        /* Flecha GPS en CSS */
         .gpx-flecha-usuario {
             width: 0; height: 0;
             border-left: 12px solid transparent;
@@ -79,18 +76,37 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <script>
-        // Estado de la aplicación
         let capaActual = 'topo';
         let coordenadasUsuario = null;
         let rumboActual = 0;
         let modoSeguimiento = 0; 
         let gpxGeojsonData = null; 
-        
-        // Datos de altitud procesados
         let datosPerfil = []; 
         let miGrafico = null;
+        let ultimoIndiceCercano = 0; // Guardar el estado para optimizar la búsqueda del gráfico
 
-        const mapaBaseEstilo = { "version": 8, "sources": {}, "layers": [] };
+        // Definición de estilo inicial directa para evitar problemas de sincronización asíncrona
+        const mapaBaseEstilo = {
+            "version": 8,
+            "sources": {
+                "topo-source": {
+                    "type": "raster",
+                    "tiles": ["https://tile.opentopomap.org/{z}/{x}/{y}.png"],
+                    "tileSize": 256,
+                    "attribution": "© OpenTopoMap"
+                },
+                "sat-source": {
+                    "type": "raster",
+                    "tiles": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+                    "tileSize": 256,
+                    "attribution": "© Esri"
+                }
+            },
+            "layers": [
+                { "id": "sat-layer", "type": "raster", "source": "sat-source", "layout": { "visibility": "none" } },
+                { "id": "topo-layer", "type": "raster", "source": "topo-source", "layout": { "visibility": "visible" } }
+            ]
+        };
 
         const map = new maplibregl.Map({
             container: 'map',
@@ -100,29 +116,15 @@
             maxZoom: 17
         });
 
+        const elFlecha = document.createElement('div');
+        elFlecha.className = 'gpx-flecha-usuario';
+        const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'map' }).setLngLat([0, 0]);
+
         map.on('load', () => {
-            map.addSource('topo-source', {
-                "type": "raster",
-                "tiles": ["https://tile.opentopomap.org/{z}/{x}/{y}.png"],
-                "tileSize": 256,
-                "attribution": "© OpenTopoMap"
-            });
-            map.addSource('sat-source', {
-                "type": "raster",
-                "tiles": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
-                "tileSize": 256,
-                "attribution": "© Esri"
-            });
-
-            map.addLayer({ "id": "sat-layer", "type": "raster", "source": "sat-source" });
-            map.addLayer({ "id": "topo-layer", "type": "raster", "source": "topo-source" });
-            map.setLayoutProperty('sat-layer', 'visibility', 'none');
-
             marcadorUsuario.addTo(map);
         });
 
         function alternarCapa() {
-            if (!map.isStyleLoaded()) return;
             if (capaActual === 'topo') {
                 map.setLayoutProperty('topo-layer', 'visibility', 'none');
                 map.setLayoutProperty('sat-layer', 'visibility', 'visible');
@@ -141,14 +143,8 @@
             const btn = document.getElementById('btn-altitud');
             panel.classList.toggle('abierto');
             btn.classList.toggle('btn-activo');
-            
-            // Forzar redibujado correcto del canvas al desplegar
             setTimeout(() => { if(miGrafico) miGrafico.resize(); }, 150);
         }
-
-        const elFlecha = document.createElement('div');
-        elFlecha.className = 'gpx-flecha-usuario';
-        const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'map' }).setLngLat([0, 0]);
 
         function conmutarModoSeguimiento() {
             modoSeguimiento = (modoSeguimiento + 1) % 3;
@@ -156,16 +152,18 @@
             if (modoSeguimiento === 0) {
                 btn.innerText = "🧭"; btn.classList.remove('btn-activo');
                 map.setBearing(0); 
+                map.setPitch(0); // Resetea la inclinación de perspectiva 3D
             } else if (modoSeguimiento === 1) {
                 btn.innerText = "📍"; btn.classList.add('btn-activo');
+                map.setPitch(0);
                 if (coordenadasUsuario) map.easeTo({ center: coordenadasUsuario, zoom: 16, duration: 800 });
             } else if (modoSeguimiento === 2) {
                 btn.innerText = "🏃‍♂️"; btn.classList.add('btn-activo');
+                map.setPitch(45); // Añade una ligera perspectiva 3D de navegación muy útil en ruta
                 solicitarPermisoOrientacion(); 
             }
         }
 
-        // MOTOR GPS CON CÁLCULO DE POSICIÓN EN EL GRÁFICO
         navigator.geolocation.watchPosition(function(pos) {
             coordenadasUsuario = [pos.coords.longitude, pos.coords.latitude];
             marcadorUsuario.setLngLat(coordenadasUsuario);
@@ -179,7 +177,6 @@
                 map.easeTo({ center: coordenadasUsuario, duration: 400, essential: true });
             }
 
-            // Si hay un GPX cargado y datos de altitud, actualizar punto en el gráfico
             if (datosPerfil.length > 0) {
                 actualizarPuntoGrafico(coordenadasUsuario);
             }
@@ -198,6 +195,8 @@
         function manejarOrientacion(event) {
             let rumbo = event.webkitCompassHeading || event.alpha;
             if (rumbo !== null && rumbo !== undefined) {
+                // En android 'alpha' incrementa al revés, se suele corregir restándolo de 360 si no es iOS
+                if(!event.webkitCompassHeading) rumbo = 360 - rumbo;
                 rumboActual = rumbo;
                 actualizarOrientacion();
             }
@@ -206,13 +205,12 @@
         function actualizarOrientacion() {
             if (modoSeguimiento === 2) {
                 marcadorUsuario.setRotation(0);
-                map.setBearing(-rumboActual); 
+                map.setBearing(rumboActual); // CORREGIDO: El bearing de la cámara debe ser positivo.
             } else {
                 marcadorUsuario.setRotation(rumboActual);
             }
         }
 
-        // Lector de archivos GPX y Procesador de Altitud
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -224,9 +222,9 @@
                 
                 gpxGeojsonData = toGeoJSON.gpx(xmlDoc); 
                 dibujarRuta(gpxGeojsonData);
-                
-                // Procesar altimetría
                 procesarAltimetria(xmlDoc);
+
+                ultimoIndiceCercano = 0; // Resetear índice al cambiar de ruta
 
                 const coordinates = gpxGeojsonData.features[0].geometry.coordinates;
                 const bounds = coordinates.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
@@ -242,13 +240,12 @@
             map.addLayer({
                 'id': 'ruta-linea', 'type': 'line', 'source': 'ruta',
                 'layout': { 'line-join': 'round', 'line-cap': 'round' },
-                'paint': { 'line-color': '#0033aa', 'line-width': 5, 'line-opacity': 0.85 }
+                'paint': { 'line-color': '#0055ff', 'line-width': 6, 'line-opacity': 0.85 }
             });
         }
 
-        // FÓRMULA HAIVERSINE (Calcular distancias en la superficie esférica terrestre)
         function calcularDistanciaKms(lon1, lat1, lon2, lat2) {
-            const R = 6371; // Radio de la Tierra en km
+            const R = 6371; 
             const dLat = (lat2 - lat1) * Math.PI / 180;
             const dLon = (lon2 - lon1) * Math.PI / 180;
             const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
@@ -256,7 +253,6 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
-        // Extraer elevación y calcular distancias acumuladas de manera escalonada
         function procesarAltimetria(xml) {
             const trkpts = xml.getElementsByTagName("trkpt");
             datosPerfil = [];
@@ -275,8 +271,8 @@
                 }
 
                 datosPerfil.push({
-                    x: parseFloat(distanciaAcumulada.toFixed(2)), // Kilómetros
-                    y: Math.round(altitud),                      // Metros
+                    x: parseFloat(distanciaAcumulada.toFixed(2)), 
+                    y: Math.round(altitud),                      
                     lat: lat,
                     lon: lon
                 });
@@ -284,7 +280,6 @@
             inicializarGrafico();
         }
 
-        // Renderizar el gráfico con Chart.js
         function inicializarGrafico() {
             if (miGrafico) miGrafico.destroy();
 
@@ -297,42 +292,48 @@
                         label: 'Perfil (m)',
                         data: datosPerfil,
                         borderColor: '#007aff',
-                        backgroundColor: 'rgba(0, 122, 255, 0.15)',
+                        backgroundColor: 'rgba(0, 122, 255, 0.12)',
                         borderWidth: 2,
                         fill: true,
                         pointRadius: 0,
                         tension: 0.1
                     }, {
                         label: 'Tú',
-                        data: [], // Se llenará dinámicamente con tu posición GPS
+                        data: [], 
                         borderColor: '#ff3b30',
                         backgroundColor: '#ff3b30',
-                        pointRadius: 6,
-                        pointHoverRadius: 8,
+                        pointRadius: 7,
+                        pointHoverRadius: 7,
                         showLine: false
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
                     scales: {
-                        x: { type: 'linear', title: { display: true, text: 'Distancia (km)', font: { size: 10 } } },
-                        y: { title: { display: true, text: 'Altitud (m)', font: { size: 10 } } }
-                    }
+                        x: { type: 'linear', grid: { display: false } },
+                        y: { grid: { color: 'rgba(0,0,0,0.05)' } }
+                    },
+                    plugins: { legend: { display: false } }
                 }
             });
         }
 
-        // Busca el punto del GPX más cercano a tu ubicación real y lo pinta en rojo sobre la gráfica
+        // OPTIMIZADO: Busca de forma inteligente reduciendo el coste de procesador (O(1) promedio vs O(N))
         function actualizarPuntoGrafico(coordsGPS) {
             if (!miGrafico || datosPerfil.length === 0) return;
 
-            let indiceMasCercano = 0;
+            let indiceMasCercano = ultimoIndiceCercano;
             let distanciaMinima = Infinity;
 
-            for (let i = 0; i < datosPerfil.length; i++) {
-                // Cálculo euclidiano simple para encontrar proximidad en coordenadas planas locales
+            // Buscamos solo en una ventana alrededor de la última posición conocida (+-15 puntos)
+            let inicio = Math.max(0, ultimoIndiceCercano - 15);
+            let fin = Math.min(datosPerfil.length, ultimoIndiceCercano + 15);
+
+            // Si se desvía demasiado o acaba de empezar, escanea la ruta completa una sola vez
+            if (ultimoIndiceCercano === 0) { inicio = 0; fin = datosPerfil.length; }
+
+            for (let i = inicio; i < fin; i++) {
                 const d = Math.pow(datosPerfil[i].lon - coordsGPS[0], 2) + Math.pow(datosPerfil[i].lat - coordsGPS[1], 2);
                 if (d < distanciaMinima) {
                     distanciaMinima = d;
@@ -340,15 +341,22 @@
                 }
             }
 
+            // Si estamos al borde de la ventana de búsqueda, ampliamos a escaneo total por seguridad
+            if ((indiceMasCercano === inicio || indiceMasCercano === fin - 1) && ultimoIndiceCercano !== 0) {
+                for (let i = 0; i < datosPerfil.length; i++) {
+                    const d = Math.pow(datosPerfil[i].lon - coordsGPS[0], 2) + Math.pow(datosPerfil[i].lat - coordsGPS[1], 2);
+                    if (d < distanciaMinima) {
+                        distanciaMinima = d;
+                        indiceMasCercano = i;
+                    }
+                }
+            }
+
+            ultimoIndiceCercano = indiceMasCercano;
             const puntoRuta = datosPerfil[indiceMasCercano];
 
-            // Actualizar el segundo dataset ("Tú") del gráfico de Chart.js
             miGrafico.data.datasets[1].data = [{ x: puntoRuta.x, y: puntoRuta.y }];
-            miGrafico.update('none'); // Update sin animaciones pesadas para no consumir batería en ruta
-        }
-
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+            miGrafico.update('none'); 
         }
     </script>
 </body>
