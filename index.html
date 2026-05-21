@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>GPS Orientado Pro - Offline Mapas</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -18,19 +18,10 @@
         }
         #map { height: 100%; width: 100%; }
         
-        /* Panel de botones estilo iOS - En la parte inferior horizontal */
+        /* Panel de botones estilo iOS con soporte de Safe Area para iPhone */
         .panel-botones {
-            position: absolute; 
-            bottom: calc(20px + env(safe-area-inset-bottom, 0px)); /* Optimizado para el "notch" de dispositivos móviles */
-            left: 50%;
-            transform: translateX(-50%); /* Centrado horizontal perfecto */
-            z-index: 10;
-            display: flex; 
-            flex-direction: row; /* Alineación en fila */
-            gap: 12px; /* Espacio equilibrado entre botones */
-            justify-content: center;
-            align-items: center;
-            width: max-content; /* Se ajusta al tamaño exacto del grupo de botones */
+            position: absolute; bottom: calc(30px + env(safe-area-inset-bottom)); right: 20px; z-index: 10;
+            display: flex; flex-direction: column; gap: 15px;
         }
         .btn-ios {
             background: rgba(255, 255, 255, 0.95); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
@@ -54,6 +45,15 @@
         .panel-altitud.abierto { top: 0; }
         .contenedor-grafico { flex-grow: 1; position: relative; width: 100%; height: 100%; }
 
+        /* HUD dinámico de información hacia el punto más alto (Estilo tarjeta iOS) */
+        .hud-ruta {
+            position: absolute; bottom: calc(30px + env(safe-area-inset-bottom)); left: 20px; z-index: 10;
+            background: rgba(255, 255, 255, 0.96); -webkit-backdrop-filter: blur(15px); backdrop-filter: blur(15px);
+            padding: 12px 16px; border-radius: 16px; box-shadow: 0px 4px 16px rgba(0,0,0,0.25);
+            font-size: 13px; color: #222; display: none; line-height: 1.45;
+            border: 1px solid rgba(0,0,0,0.06); min-width: 160px;
+        }
+
         /* Flecha GPS en CSS */
         .gpx-flecha-usuario {
             width: 0; height: 0;
@@ -75,6 +75,8 @@
 
     <div id="map"></div>
     
+    <div id="hud-ruta" class="hud-ruta"></div>
+    
     <div class="panel-botones">
         <button class="btn-ios" id="btn-capa" onclick="alternarCapa()">⛰️</button>
         <button class="btn-ios" id="btn-altitud" onclick="alternarPanelAltitud()">📊</button>
@@ -93,6 +95,399 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/pmtiles@3.2.0/dist/pmtiles.js"></script>
 
-    <script src="app.js"></script>
+    <script>
+        const protocol = new pmtiles.Protocol();
+        maplibregl.addProtocol("pmtiles", protocol.tile);
+
+        let capaActual = 'topo';
+        let coordenadasUsuario = null;
+        let rumboActual = 0;
+        let modoSeguimiento = 0; 
+        let gpxGeojsonData = null; 
+        let datosPerfil = []; 
+        let miGrafico = null;
+        let ultimoIndiceCercano = 0; 
+
+        // Variables globales para el cálculo del punto más alto
+        let puntoMasAlto = null;
+        let indicePuntoMasAlto = 0;
+
+        const mapaBaseEstilo = {
+            "version": 8,
+            "sources": {
+                "topo-source": {
+                    "type": "raster",
+                    "tiles": ["https://tile.opentopomap.org/{z}/{x}/{y}.png"],
+                    "tileSize": 256,
+                    "attribution": "© OpenTopoMap"
+                },
+                "sat-source": {
+                    "type": "raster",
+                    "tiles": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+                    "tileSize": 256,
+                    "attribution": "© Esri"
+                }
+            },
+            "layers": [
+                { "id": "sat-layer", "type": "raster", "source": "sat-source", "layout": { "visibility": "none" } },
+                { "id": "topo-layer", "type": "raster", "source": "topo-source", "layout": { "visibility": "visible" } }
+            ]
+        };
+
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: mapaBaseEstilo,
+            center: [-3.7037, 40.4167],
+            zoom: 6,
+            maxZoom: 17
+        });
+
+        const elFlecha = document.createElement('div');
+        elFlecha.className = 'gpx-flecha-usuario';
+        
+        // CORRECCIÓN IPHONE: Se cambia a 'viewport' para suavizar por completo el renderizado en iOS Safari
+        const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'viewport' }).setLngLat([0, 0]);
+
+        map.on('load', () => {
+            marcadorUsuario.addTo(map);
+        });
+
+        function alternarCapa() {
+            if (capaActual === 'topo') {
+                map.setLayoutProperty('topo-layer', 'visibility', 'none');
+                map.setLayoutProperty('sat-layer', 'visibility', 'visible');
+                capaActual = 'sat';
+                document.getElementById('btn-capa').innerText = '🛰️';
+            } else {
+                map.setLayoutProperty('sat-layer', 'visibility', 'none');
+                map.setLayoutProperty('topo-layer', 'visibility', 'visible');
+                capaActual = 'topo';
+                document.getElementById('btn-capa').innerText = '⛰️';
+            }
+        }
+
+        function alternarPanelAltitud() {
+            const panel = document.getElementById('panel-altitud');
+            const btn = document.getElementById('btn-altitud');
+            panel.classList.toggle('abierto');
+            btn.classList.toggle('btn-activo');
+            setTimeout(() => { if(miGrafico) miGrafico.resize(); }, 150);
+        }
+
+        function conmutarModoSeguimiento() {
+            modoSeguimiento = (modoSeguimiento + 1) % 3;
+            const btn = document.getElementById('btn-brujula');
+            if (modoSeguimiento === 0) {
+                btn.innerText = "🧭"; btn.classList.remove('btn-activo');
+                map.setBearing(0); map.setPitch(0); 
+                actualizarOrientacion();
+            } else if (modoSeguimiento === 1) {
+                btn.innerText = "📍"; btn.classList.add('btn-activo');
+                map.setPitch(0);
+                if (coordenadasUsuario) map.easeTo({ center: coordenadasUsuario, zoom: 16, duration: 800 });
+                solicitarPermisoOrientacion(); // CORRECCIÓN IPHONE: Permiso inmediato en el primer clic
+            } else if (modoSeguimiento === 2) {
+                btn.innerText = "🏃‍♂️"; btn.classList.add('btn-activo');
+                map.setPitch(45);
+                solicitarPermisoOrientacion(); 
+            }
+        }
+
+        navigator.geolocation.watchPosition(function(pos) {
+            coordenadasUsuario = [pos.coords.longitude, pos.coords.latitude];
+            marcadorUsuario.setLngLat(coordenadasUsuario);
+
+            if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading !== undefined) {
+                if (modoSeguimiento < 2) {
+                    rumboActual = pos.coords.heading;
+                    actualizarOrientacion();
+                }
+            }
+            if (modoSeguimiento >= 1) {
+                map.easeTo({ center: coordenadasUsuario, duration: 400, essential: true });
+            }
+            if (datosPerfil.length > 0) {
+                actualizarPuntoGrafico(coordenadasUsuario);
+            }
+        }, function(err) { console.error(err); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
+
+        function solicitarPermisoOrientacion() {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission().then(response => {
+                    if (response === 'granted') {
+                        window.removeEventListener('deviceorientation', manejarOrientacion, true);
+                        window.addEventListener('deviceorientation', manejarOrientacion, true);
+                    }
+                }).catch(console.error);
+            } else {
+                if ('ondeviceorientationabsolute' in window) {
+                    window.addEventListener('deviceorientationabsolute', manejarOrientacion, true);
+                } else {
+                    window.addEventListener('deviceorientation', manejarOrientacion, true);
+                }
+            }
+        }
+
+        function manejarOrientacion(event) {
+            let rumbo = null;
+            if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
+                rumbo = event.webkitCompassHeading; // Brújula hardware nativa de iOS
+            } else if (event.alpha !== undefined && event.alpha !== null) {
+                if (event.absolute === true || event.type === 'deviceorientationabsolute') {
+                    rumbo = 360 - event.alpha;
+                }
+            }
+            if (rumbo !== null && !isNaN(rumbo)) {
+                rumboActual = rumbo;
+                actualizarOrientacion();
+            }
+        }
+
+        function actualizarOrientacion() {
+            if (modoSeguimiento === 2) {
+                map.setBearing(rumboActual);
+                marcadorUsuario.setRotation(0); 
+            } else {
+                marcadorUsuario.setRotation(rumboActual - map.getBearing());
+            }
+        }
+
+        // Corregir orientación si el usuario rota el mapa manualmente con los dedos
+        map.on('rotate', () => {
+            if (modoSeguimiento < 2) actualizarOrientacion();
+        });
+
+        // Lector de archivos GPX
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(evt.target.result, "text/xml");
+                gpxGeojsonData = toGeoJSON.gpx(xmlDoc); 
+                dibujarRuta(gpxGeojsonData);
+                procesarAltimetria(xmlDoc);
+                ultimoIndiceCercano = 0;
+
+                const coordinates = gpxGeojsonData.features[0].geometry.coordinates;
+                const bounds = coordinates.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
+                map.fitBounds(bounds, { padding: 40 });
+            };
+            reader.readAsText(file);
+        });
+
+        // Lector e inyector de mapas locales PMTiles
+        document.getElementById('map-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const blobSource = new pmtiles.BlobSource(file);
+            const p = new pmtiles.PMTiles(blobSource);
+            protocol.add(p); 
+
+            p.getHeader().then(header => {
+                if (map.getLayer('capa-offline')) map.removeLayer('capa-offline');
+                if (map.getSource('fuente-offline')) map.removeSource('fuente-offline');
+
+                map.setLayoutProperty('topo-layer', 'visibility', 'none');
+                map.setLayoutProperty('sat-layer', 'visibility', 'none');
+
+                if (header.tileType === 1) {
+                    map.addSource('fuente-offline', {
+                        type: 'vector',
+                        url: `pmtiles://${p.url}`
+                    });
+                    map.addLayer({
+                        id: 'capa-offline',
+                        type: 'line',
+                        source: 'fuente-offline',
+                        'source-layer': 'basemap', 
+                        paint: { 'line-color': '#757575', 'line-width': 1.5 }
+                    }, map.getLayer('ruta-linea') ? 'ruta-linea' : undefined);
+                } else {
+                    map.addSource('fuente-offline', {
+                        type: 'raster',
+                        url: `pmtiles://${p.url}`,
+                        tileSize: 256
+                    });
+                    map.addLayer({
+                        id: 'capa-offline',
+                        type: 'raster',
+                        source: 'fuente-offline'
+                    }, map.getLayer('ruta-linea') ? 'ruta-linea' : undefined);
+                }
+
+                document.getElementById('label-mapa').classList.add('btn-activo');
+
+                if (header.minLon !== undefined) {
+                    map.fitBounds([header.minLon, header.minLat, header.maxLon, header.maxLat], { padding: 40 });
+                }
+            }).catch(err => {
+                alert("Error leyendo el mapa PMTiles: " + err.message);
+            });
+        });
+
+        function dibujarRuta(geoJsonData) {
+            if (map.getLayer('ruta-linea')) map.removeLayer('ruta-linea');
+            if (map.getSource('ruta')) map.removeSource('ruta');
+            map.addSource('ruta', { type: 'geojson', data: geoJsonData });
+            map.addLayer({
+                'id': 'ruta-linea', 'type': 'line', 'source': 'ruta',
+                'layout': { 'line-join': 'round', 'line-cap': 'round' },
+                'paint': { 'line-color': '#0055ff', 'line-width': 6, 'line-opacity': 0.85 }
+            });
+        }
+
+        function calcularDistanciaKms(lon1, lat1, lon2, lat2) {
+            const R = 6371; 
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        function procesarAltimetria(xml) {
+            const trkpts = xml.getElementsByTagName("trkpt");
+            datosPerfil = [];
+            let distanciaAcumulada = 0;
+            let maxAltitud = -Infinity;
+            indicePuntoMasAlto = 0;
+
+            for (let i = 0; i < trkpts.length; i++) {
+                const lat = parseFloat(trkpts[i].getAttribute("lat"));
+                const lon = parseFloat(trkpts[i].getAttribute("lon"));
+                const eleNode = trkpts[i].getElementsByTagName("ele")[0];
+                const altitud = eleNode ? parseFloat(eleNode.textContent) : 0;
+
+                if (i > 0) {
+                    const latPrev = parseFloat(trkpts[i-1].getAttribute("lat"));
+                    const lonPrev = parseFloat(trkpts[i-1].getAttribute("lon"));
+                    distanciaAcumulada += calcularDistanciaKms(lonPrev, latPrev, lon, lat);
+                }
+
+                const punto = {
+                    x: parseFloat(distanciaAcumulada.toFixed(2)), 
+                    y: Math.round(altitud),                      
+                    lat: lat, lon: lon
+                };
+
+                datosPerfil.push(punto);
+
+                // Evaluar cuál es el punto más alto de la ruta
+                if (punto.y > maxAltitud) {
+                    maxAltitud = punto.y;
+                    indicePuntoMasAlto = i;
+                }
+            }
+
+            // Inicializar o limpiar el panel dinámico HUD
+            if (datosPerfil.length > 0) {
+                puntoMasAlto = datosPerfil[indicePuntoMasAlto];
+                document.getElementById('hud-ruta').style.display = 'block';
+                actualizarHudPuntoAlto(0); // Muestra datos iniciales desde el km 0
+            } else {
+                puntoMasAlto = null;
+                document.getElementById('hud-ruta').style.display = 'none';
+            }
+
+            inicializarGrafico();
+        }
+
+        // NUEVA FUNCIÓN: Actualiza el componente HUD con la distancia y altitud restante
+        function actualizarHudPuntoAlto(indiceActual) {
+            if (!puntoMasAlto) return;
+            const elHud = document.getElementById('hud-ruta');
+            const puntoRuta = datosPerfil[indiceActual];
+            
+            if (indiceActual <= indicePuntoMasAlto) {
+                // El usuario está antes de llegar a la cumbre
+                const distRestante = puntoMasAlto.x - puntoRuta.x;
+                const altRestante = puntoMasAlto.y - puntoRuta.y;
+                
+                elHud.innerHTML = `
+                    <div style="font-weight: 600; color: #007aff; margin-bottom: 2px;">Al punto más alto:</div>
+                    <div>Distancia: <b>${distRestante.toFixed(2)} km</b></div>
+                    <div>Desnivel: <b>+${altRestante} m</b></div>
+                    <div style="font-size: 11px; color: #666; margin-top: 5px; border-top: 1px solid #ddd; padding-top:3px;">Alt. Máx: ${puntoMasAlto.y}m</div>
+                `;
+            } else {
+                // El usuario ya ha sobrepasado la cumbre
+                const distPasada = puntoRuta.x - puntoMasAlto.x;
+                
+                elHud.innerHTML = `
+                    <div style="font-weight: 600; color: #4cd964; margin-bottom: 2px;">Punto más alto:</div>
+                    <div style="font-weight: bold; color: #4cd964;">¡Superado! 🎉</div>
+                    <div style="font-size: 12px; color: #444;">Hace ${distPasada.toFixed(2)} km</div>
+                    <div style="font-size: 11px; color: #666; margin-top: 5px; border-top: 1px solid #ddd; padding-top:3px;">Alt. Máx: ${puntoMasAlto.y}m</div>
+                `;
+            }
+        }
+
+        function inicializarGrafico() {
+            if (miGrafico) miGrafico.destroy();
+            const ctx = document.getElementById('graficoAltitud').getContext('2d');
+            miGrafico = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Perfil (m)', data: datosPerfil,
+                        borderColor: '#007aff', backgroundColor: 'rgba(0, 122, 255, 0.12)',
+                        borderWidth: 2, fill: true, pointRadius: 0, tension: 0.1
+                    }, {
+                        label: 'Tú', data: [], 
+                        borderColor: '#ff3b30', backgroundColor: '#ff3b30',
+                        pointRadius: 7, pointHoverRadius: 7, showLine: false
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { type: 'linear', grid: { display: false } },
+                        y: { grid: { color: 'rgba(0,0,0,0.05)' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        function actualizarPuntoGrafico(coordsGPS) {
+            if (!miGrafico || datosPerfil.length === 0) return;
+            let indiceMasCercano = ultimoIndiceCercano;
+            let distanciaMinima = Infinity;
+            let inicio = Math.max(0, ultimoIndiceCercano - 15);
+            let fin = Math.min(datosPerfil.length, ultimoIndiceCercano + 15);
+
+            if (ultimoIndiceCercano === 0) { inicio = 0; fin = datosPerfil.length; }
+
+            for (let i = inicio; i < fin; i++) {
+                const d = Math.pow(datosPerfil[i].lon - coordsGPS[0], 2) + Math.pow(datosPerfil[i].lat - coordsGPS[1], 2);
+                if (d < distanciaMinima) { distanciaMinima = d; indiceMasCercano = i; }
+            }
+
+            if ((indiceMasCercano === inicio || indiceMasCercano === fin - 1) && ultimoIndiceCercano !== 0) {
+                for (let i = 0; i < datosPerfil.length; i++) {
+                    const d = Math.pow(datosPerfil[i].lon - coordsGPS[0], 2) + Math.pow(datosPerfil[i].lat - coordsGPS[1], 2);
+                    if (d < distanciaMinima) { distanciaMinima = d; indiceMasCercano = i; }
+                }
+            }
+
+            ultimoIndiceCercano = indiceMasCercano;
+            const puntoRuta = datosPerfil[indiceMasCercano];
+            miGrafico.data.datasets[1].data = [{ x: puntoRuta.x, y: puntoRuta.y }];
+            miGrafico.update('none'); 
+
+            // ENLACE DINÁMICO: Actualizar los datos del HUD según avanza el GPS
+            actualizarHudPuntoAlto(indiceMasCercano);
+        }
+
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => { 
+                navigator.serviceWorker.register('./sw.js').catch((err) => console.error("SW Error:", err)); 
+            });
+        }
+    </script>
 </body>
 </html>
