@@ -1,5 +1,5 @@
 // Nombre de la versión de la caché. Cámbialo si actualizas la app para forzar el refresco.
-const CACHE_NAME = 'gps-orientado-v1';
+const CACHE_NAME = 'gps-orientado-v2';
 
 // Archivos estáticos indispensables para que la app funcione offline
 const ASSETS_CRITICOS = [
