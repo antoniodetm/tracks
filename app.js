@@ -43,7 +43,9 @@ const map = new maplibregl.Map({
 
 const elFlecha = document.createElement('div');
 elFlecha.className = 'gpx-flecha-usuario';
-const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'map' }).setLngLat([0, 0]);
+
+// OPTIMIZACIÓN IPHONE: Se usa 'viewport' para evitar el retraso o salto de transformación en iOS Safari
+const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'viewport' }).setLngLat([0, 0]);
 
 map.on('load', () => {
     marcadorUsuario.addTo(map);
@@ -77,10 +79,12 @@ function conmutarModoSeguimiento() {
     if (modoSeguimiento === 0) {
         btn.innerText = "🧭"; btn.classList.remove('btn-activo');
         map.setBearing(0); map.setPitch(0); 
+        actualizarOrientacion();
     } else if (modoSeguimiento === 1) {
         btn.innerText = "📍"; btn.classList.add('btn-activo');
         map.setPitch(0);
         if (coordenadasUsuario) map.easeTo({ center: coordenadasUsuario, zoom: 16, duration: 800 });
+        solicitarPermisoOrientacion(); // OPTIMIZACIÓN IPHONE: Solicita permiso aquí para activar la brújula desde ya
     } else if (modoSeguimiento === 2) {
         btn.innerText = "🏃‍♂️"; btn.classList.add('btn-activo');
         map.setPitch(45);
@@ -92,9 +96,11 @@ navigator.geolocation.watchPosition(function(pos) {
     coordenadasUsuario = [pos.coords.longitude, pos.coords.latitude];
     marcadorUsuario.setLngLat(coordenadasUsuario);
 
-    if (pos.coords.heading !== null && !isNaN(pos.coords.heading)) {
-        rumboActual = pos.coords.heading;
-        actualizarOrientacion();
+    if (pos.coords.heading !== null && !isNaN(pos.coords.heading) && pos.coords.heading !== undefined) {
+        if (modoSeguimiento < 2) {
+            rumboActual = pos.coords.heading;
+            actualizarOrientacion();
+        }
     }
     if (modoSeguimiento >= 1) {
         map.easeTo({ center: coordenadasUsuario, duration: 400, essential: true });
@@ -106,18 +112,36 @@ navigator.geolocation.watchPosition(function(pos) {
 
 function solicitarPermisoOrientacion() {
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        // Bloque nativo para iOS (iPhone)
         DeviceOrientationEvent.requestPermission().then(response => {
-            if (response === 'granted') window.addEventListener('deviceorientation', manejarOrientacion, true);
+            if (response === 'granted') {
+                window.removeEventListener('deviceorientation', manejarOrientacion, true);
+                window.addEventListener('deviceorientation', manejarOrientacion, true);
+            }
         }).catch(console.error);
     } else {
-        window.addEventListener('deviceorientation', manejarOrientacion, true);
+        // Bloque para Android y otros dispositivos
+        if ('ondeviceorientationabsolute' in window) {
+            window.addEventListener('deviceorientationabsolute', manejarOrientacion, true);
+        } else {
+            window.addEventListener('deviceorientation', manejarOrientacion, true);
+        }
     }
 }
 
 function manejarOrientacion(event) {
-    let rumbo = event.webkitCompassHeading || event.alpha;
-    if (rumbo !== null && rumbo !== undefined) {
-        if(!event.webkitCompassHeading) rumbo = 360 - rumbo;
+    let rumbo = null;
+
+    if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
+        rumbo = event.webkitCompassHeading; // Rumbo nativo de brújula calibrada en iOS
+    } 
+    else if (event.alpha !== undefined && event.alpha !== null) {
+        if (event.absolute === true || event.type === 'deviceorientationabsolute') {
+            rumbo = 360 - event.alpha;
+        }
+    }
+
+    if (rumbo !== null && !isNaN(rumbo)) {
         rumboActual = rumbo;
         actualizarOrientacion();
     }
@@ -125,12 +149,20 @@ function manejarOrientacion(event) {
 
 function actualizarOrientacion() {
     if (modoSeguimiento === 2) {
-        marcadorUsuario.setRotation(0);
         map.setBearing(rumboActual);
+        marcadorUsuario.setRotation(0); // Al usar viewport, 0 significa que siempre apunta recto hacia adelante en la pantalla
     } else {
-        marcadorUsuario.setRotation(rumboActual);
+        // Corregimos el rumbo restando el bearing actual del mapa por si el usuario lo rota con los dedos
+        marcadorUsuario.setRotation(rumboActual - map.getBearing());
     }
 }
+
+// Escucha si el usuario rota el mapa manualmente en modo libre para corregir la flecha en tiempo real
+map.on('rotate', () => {
+    if (modoSeguimiento < 2) {
+        actualizarOrientacion();
+    }
+});
 
 // Lector de archivos GPX
 document.getElementById('file-input').addEventListener('change', function(e) {
