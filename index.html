@@ -18,6 +18,7 @@
         }
         #map { height: 100%; width: 100%; }
         
+        /* Panel de botones estilo iOS */
         .panel-botones {
             position: absolute; bottom: 30px; right: 20px; z-index: 10;
             display: flex; flex-direction: column; gap: 15px;
@@ -32,6 +33,7 @@
         .btn-activo { background: #007aff !important; color: white !important; }
         #file-input { display: none; }
         
+        /* Contenedor del Perfil de Altitud */
         .panel-altitud {
             position: absolute; top: -100%; left: 0; width: 100%; height: 220px;
             background: rgba(255, 255, 255, 0.95); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
@@ -43,6 +45,7 @@
         .panel-altitud.abierto { top: 0; }
         .contenedor-grafico { flex-grow: 1; position: relative; width: 100%; height: 100%; }
 
+        /* Flecha GPS en CSS */
         .gpx-flecha-usuario {
             width: 0; height: 0;
             border-left: 12px solid transparent;
@@ -76,6 +79,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <script>
+        // Estado de la aplicación
         let capaActual = 'topo';
         let coordenadasUsuario = null;
         let rumboActual = 0;
@@ -83,9 +87,9 @@
         let gpxGeojsonData = null; 
         let datosPerfil = []; 
         let miGrafico = null;
-        let ultimoIndiceCercano = 0; // Guardar el estado para optimizar la búsqueda del gráfico
+        let ultimoIndiceCercano = 0; // Optimización de rendimiento para tracking
 
-        // Definición de estilo inicial directa para evitar problemas de sincronización asíncrona
+        // Estilo base con capas preconfiguradas para evitar condiciones de carrera asíncronas
         const mapaBaseEstilo = {
             "version": 8,
             "sources": {
@@ -108,6 +112,7 @@
             ]
         };
 
+        // Inicialización del mapa
         const map = new maplibregl.Map({
             container: 'map',
             style: mapaBaseEstilo,
@@ -116,6 +121,7 @@
             maxZoom: 17
         });
 
+        // Crear elemento e indicador del usuario
         const elFlecha = document.createElement('div');
         elFlecha.className = 'gpx-flecha-usuario';
         const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'map' }).setLngLat([0, 0]);
@@ -124,6 +130,7 @@
             marcadorUsuario.addTo(map);
         });
 
+        // Alternar visualización entre Topográfico y Satélite
         function alternarCapa() {
             if (capaActual === 'topo') {
                 map.setLayoutProperty('topo-layer', 'visibility', 'none');
@@ -138,32 +145,38 @@
             }
         }
 
+        // Desplegar/esconder panel superior de altimetría
         function alternarPanelAltitud() {
             const panel = document.getElementById('panel-altitud');
             const btn = document.getElementById('btn-altitud');
             panel.classList.toggle('abierto');
             btn.classList.toggle('btn-activo');
+            
+            // Forzar redibujado para evitar bug de deformación en Chart.js
             setTimeout(() => { if(miGrafico) miGrafico.resize(); }, 150);
         }
 
+        // Control de modos de navegación y cámara
         function conmutarModoSeguimiento() {
             modoSeguimiento = (modoSeguimiento + 1) % 3;
             const btn = document.getElementById('btn-brujula');
+            
             if (modoSeguimiento === 0) {
                 btn.innerText = "🧭"; btn.classList.remove('btn-activo');
                 map.setBearing(0); 
-                map.setPitch(0); // Resetea la inclinación de perspectiva 3D
+                map.setPitch(0); 
             } else if (modoSeguimiento === 1) {
                 btn.innerText = "📍"; btn.classList.add('btn-activo');
                 map.setPitch(0);
                 if (coordenadasUsuario) map.easeTo({ center: coordenadasUsuario, zoom: 16, duration: 800 });
             } else if (modoSeguimiento === 2) {
                 btn.innerText = "🏃‍♂️"; btn.classList.add('btn-activo');
-                map.setPitch(45); // Añade una ligera perspectiva 3D de navegación muy útil en ruta
+                map.setPitch(45); // Perspectiva 3D de navegación deportiva
                 solicitarPermisoOrientacion(); 
             }
         }
 
+        // Motor de geolocalización en tiempo real
         navigator.geolocation.watchPosition(function(pos) {
             coordenadasUsuario = [pos.coords.longitude, pos.coords.latitude];
             marcadorUsuario.setLngLat(coordenadasUsuario);
@@ -182,6 +195,7 @@
             }
         }, function(err) { console.error(err); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
 
+        // Sensores de orientación de dispositivo (Brújula interna)
         function solicitarPermisoOrientacion() {
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission().then(response => {
@@ -195,7 +209,7 @@
         function manejarOrientacion(event) {
             let rumbo = event.webkitCompassHeading || event.alpha;
             if (rumbo !== null && rumbo !== undefined) {
-                // En android 'alpha' incrementa al revés, se suele corregir restándolo de 360 si no es iOS
+                // Corrección estándar de azimut para dispositivos Android
                 if(!event.webkitCompassHeading) rumbo = 360 - rumbo;
                 rumboActual = rumbo;
                 actualizarOrientacion();
@@ -205,12 +219,13 @@
         function actualizarOrientacion() {
             if (modoSeguimiento === 2) {
                 marcadorUsuario.setRotation(0);
-                map.setBearing(rumboActual); // CORREGIDO: El bearing de la cámara debe ser positivo.
+                map.setBearing(rumboActual); // CORREGIDO: Giro nativo adaptado a MapLibre
             } else {
                 marcadorUsuario.setRotation(rumboActual);
             }
         }
 
+        // Lector e importador de archivos GPX
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -224,8 +239,9 @@
                 dibujarRuta(gpxGeojsonData);
                 procesarAltimetria(xmlDoc);
 
-                ultimoIndiceCercano = 0; // Resetear índice al cambiar de ruta
+                ultimoIndiceCercano = 0; // Resetear índice al cambiar de track
 
+                // Encuadrar mapa automáticamente alrededor del GPX cargado
                 const coordinates = gpxGeojsonData.features[0].geometry.coordinates;
                 const bounds = coordinates.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
                 map.fitBounds(bounds, { padding: 40 });
@@ -244,6 +260,7 @@
             });
         }
 
+        // Fórmula matemática de Haversine
         function calcularDistanciaKms(lon1, lat1, lon2, lat2) {
             const R = 6371; 
             const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -253,6 +270,7 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
+        // Procesamiento del perfil longitudinal del terreno
         function procesarAltimetria(xml) {
             const trkpts = xml.getElementsByTagName("trkpt");
             datosPerfil = [];
@@ -280,6 +298,7 @@
             inicializarGrafico();
         }
 
+        // Renderizado del Chart de Elevación
         function inicializarGrafico() {
             if (miGrafico) miGrafico.destroy();
 
@@ -319,18 +338,17 @@
             });
         }
 
-        // OPTIMIZADO: Busca de forma inteligente reduciendo el coste de procesador (O(1) promedio vs O(N))
+        // OPTIMIZADO: Ventana inteligente de escaneo local para ahorrar batería móvil
         function actualizarPuntoGrafico(coordsGPS) {
             if (!miGrafico || datosPerfil.length === 0) return;
 
             let indiceMasCercano = ultimoIndiceCercano;
             let distanciaMinima = Infinity;
 
-            // Buscamos solo en una ventana alrededor de la última posición conocida (+-15 puntos)
+            // Escanea inicialmente solo un rango cercano de +-15 puntos
             let inicio = Math.max(0, ultimoIndiceCercano - 15);
             let fin = Math.min(datosPerfil.length, ultimoIndiceCercano + 15);
 
-            // Si se desvía demasiado o acaba de empezar, escanea la ruta completa una sola vez
             if (ultimoIndiceCercano === 0) { inicio = 0; fin = datosPerfil.length; }
 
             for (let i = inicio; i < fin; i++) {
@@ -341,7 +359,7 @@
                 }
             }
 
-            // Si estamos al borde de la ventana de búsqueda, ampliamos a escaneo total por seguridad
+            // Si salta fuera del rango por pérdida de señal, hace un escaneo global de seguridad
             if ((indiceMasCercano === inicio || indiceMasCercano === fin - 1) && ultimoIndiceCercano !== 0) {
                 for (let i = 0; i < datosPerfil.length; i++) {
                     const d = Math.pow(datosPerfil[i].lon - coordsGPS[0], 2) + Math.pow(datosPerfil[i].lat - coordsGPS[1], 2);
@@ -356,7 +374,14 @@
             const puntoRuta = datosPerfil[indiceMasCercano];
 
             miGrafico.data.datasets[1].data = [{ x: puntoRuta.x, y: puntoRuta.y }];
-            miGrafico.update('none'); 
+            miGrafico.update('none'); // Renderizado directo sin animaciones pesadas
+        }
+
+        // Registro del Service Worker para soporte Offline total
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => { 
+                navigator.serviceWorker.register('./sw.js').catch((err) => console.error("SW Error:", err)); 
+            });
         }
     </script>
 </body>
