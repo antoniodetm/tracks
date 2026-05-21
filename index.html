@@ -18,43 +18,81 @@
         }
         #map { height: 100%; width: 100%; }
         
-        /* Panel de botones estilo iOS con soporte de Safe Area para iPhone */
+        /* BARRA DE BOTONES: Estilo Dock iOS flotante en la parte inferior */
         .panel-botones {
-            position: absolute; bottom: calc(30px + env(safe-area-inset-bottom)); right: 20px; z-index: 10;
-            display: flex; flex-direction: column; gap: 15px;
+            position: absolute; 
+            bottom: calc(12px + env(safe-area-inset-bottom)); 
+            left: 50%; 
+            transform: translateX(-50%); 
+            z-index: 20;
+            display: flex; 
+            flex-direction: row; 
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+            padding: 8px 12px;
+            border-radius: 30px;
+            box-shadow: 0px 8px 24px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.2);
+            width: max-content;
         }
         .btn-ios {
-            background: rgba(255, 255, 255, 0.95); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-            border: none; border-radius: 50%; box-shadow: 0px 4px 12px rgba(0,0,0,0.35);
-            font-size: 24px; width: 55px; height: 55px; display: flex; align-items: center; justify-content: center;
-            cursor: pointer; transition: transform 0.1s ease;
+            background: rgba(0, 0, 0, 0.05); border: none; border-radius: 50%;
+            font-size: 20px; width: 46px; height: 46px; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: transform 0.1s ease, background-color 0.2s;
         }
-        .btn-ios:active { transform: scale(0.92); }
+        .btn-ios:active { transform: scale(0.9); }
         .btn-activo { background: #007aff !important; color: white !important; }
         .input-oculto { display: none; }
         
-        /* Contenedor del Perfil de Altitud */
-        .panel-altitud {
-            position: absolute; top: -100%; left: 0; width: 100%; height: 220px;
-            background: rgba(255, 255, 255, 0.95); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
-            z-index: 15; border-bottom: 1px solid rgba(0,0,0,0.1);
-            transition: top 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            padding: 15px; box-sizing: border-box;
-            display: flex; flex-direction: column;
+        /* HUD INFORMATIVO: Centrado y flotando justo encima de los botones */
+        .hud-ruta {
+            position: absolute; 
+            bottom: calc(82px + env(safe-area-inset-bottom)); 
+            left: 50%; 
+            transform: translateX(-50%); 
+            z-index: 10;
+            background: rgba(255, 255, 255, 0.96); 
+            -webkit-backdrop-filter: blur(15px); backdrop-filter: blur(15px);
+            padding: 12px 16px; 
+            border-radius: 18px; 
+            box-shadow: 0px 6px 20px rgba(0,0,0,0.2);
+            font-size: 13px; color: #222; 
+            display: none; 
+            line-height: 1.4;
+            border: 1px solid rgba(0,0,0,0.06); 
+            width: calc(100% - 32px); 
+            max-width: 380px; 
+            box-sizing: border-box;
         }
-        .panel-altitud.abierto { top: 0; }
+
+        /* GRÁFICO DE ALTITUD: Estilo "Bottom Sheet" deslizable desde abajo */
+        .panel-altitud {
+            position: absolute; 
+            bottom: -100%; left: 0; width: 100%; 
+            height: calc(260px + env(safe-area-inset-bottom));
+            background: rgba(255, 255, 255, 0.97); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+            z-index: 30; 
+            border-top: 1px solid rgba(0,0,0,0.1);
+            border-radius: 24px 24px 0 0;
+            box-shadow: 0px -8px 24px rgba(0,0,0,0.15);
+            transition: bottom 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            padding: 14px 16px calc(14px + env(safe-area-inset-bottom)) 16px; 
+            box-sizing: border-box;
+            display: flex; 
+            flex-direction: column;
+        }
+        .panel-altitud.abierto { bottom: 0; }
+        .cabecera-altitud {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+        }
+        .btn-cerrar {
+            background: rgba(0,0,0,0.06); border: none; width: 28px; height: 28px; border-radius: 50%;
+            font-weight: bold; color: #555; cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
         .contenedor-grafico { flex-grow: 1; position: relative; width: 100%; height: 100%; }
 
-        /* HUD dinámico de información hacia el punto más alto (Estilo tarjeta iOS) */
-        .hud-ruta {
-            position: absolute; bottom: calc(30px + env(safe-area-inset-bottom)); left: 20px; z-index: 10;
-            background: rgba(255, 255, 255, 0.96); -webkit-backdrop-filter: blur(15px); backdrop-filter: blur(15px);
-            padding: 12px 16px; border-radius: 16px; box-shadow: 0px 4px 16px rgba(0,0,0,0.25);
-            font-size: 13px; color: #222; display: none; line-height: 1.45;
-            border: 1px solid rgba(0,0,0,0.06); min-width: 160px;
-        }
-
-        /* Flecha GPS en CSS */
+        /* Flecha GPS */
         .gpx-flecha-usuario {
             width: 0; height: 0;
             border-left: 12px solid transparent;
@@ -67,15 +105,19 @@
 </head>
 <body>
 
+    <div id="map"></div>
+    
+    <div id="hud-ruta" class="hud-ruta"></div>
+    
     <div id="panel-altitud" class="panel-altitud">
+        <div class="cabecera-altitud">
+            <span style="font-weight: 600; color: #222; font-size: 15px;">Perfil de Altitud</span>
+            <button class="btn-cerrar" onclick="alternarPanelAltitud()">✕</button>
+        </div>
         <div class="contenedor-grafico">
             <canvas id="graficoAltitud"></canvas>
         </div>
     </div>
-
-    <div id="map"></div>
-    
-    <div id="hud-ruta" class="hud-ruta"></div>
     
     <div class="panel-botones">
         <button class="btn-ios" id="btn-capa" onclick="alternarCapa()">⛰️</button>
@@ -108,7 +150,6 @@
         let miGrafico = null;
         let ultimoIndiceCercano = 0; 
 
-        // Variables globales para el cálculo del punto más alto
         let puntoMasAlto = null;
         let indicePuntoMasAlto = 0;
 
@@ -145,7 +186,6 @@
         const elFlecha = document.createElement('div');
         elFlecha.className = 'gpx-flecha-usuario';
         
-        // CORRECCIÓN IPHONE: Se cambia a 'viewport' para suavizar por completo el renderizado en iOS Safari
         const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'viewport' }).setLngLat([0, 0]);
 
         map.on('load', () => {
@@ -185,7 +225,7 @@
                 btn.innerText = "📍"; btn.classList.add('btn-activo');
                 map.setPitch(0);
                 if (coordenadasUsuario) map.easeTo({ center: coordenadasUsuario, zoom: 16, duration: 800 });
-                solicitarPermisoOrientacion(); // CORRECCIÓN IPHONE: Permiso inmediato en el primer clic
+                solicitarPermisoOrientacion();
             } else if (modoSeguimiento === 2) {
                 btn.innerText = "🏃‍♂️"; btn.classList.add('btn-activo');
                 map.setPitch(45);
@@ -231,7 +271,7 @@
         function manejarOrientacion(event) {
             let rumbo = null;
             if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
-                rumbo = event.webkitCompassHeading; // Brújula hardware nativa de iOS
+                rumbo = event.webkitCompassHeading;
             } else if (event.alpha !== undefined && event.alpha !== null) {
                 if (event.absolute === true || event.type === 'deviceorientationabsolute') {
                     rumbo = 360 - event.alpha;
@@ -252,12 +292,10 @@
             }
         }
 
-        // Corregir orientación si el usuario rota el mapa manualmente con los dedos
         map.on('rotate', () => {
             if (modoSeguimiento < 2) actualizarOrientacion();
         });
 
-        // Lector de archivos GPX
         document.getElementById('file-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -278,7 +316,6 @@
             reader.readAsText(file);
         });
 
-        // Lector e inyector de mapas locales PMTiles
         document.getElementById('map-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -376,18 +413,13 @@
 
                 datosPerfil.push(punto);
 
-                // Evaluar cuál es el punto más alto de la ruta
-                if (punto.y > maxAltitud) {
-                    maxAltitud = punto.y;
-                    indicePuntoMasAlto = i;
-                }
+                if (punto.y > maxAltitud) {maxAltitud = punto.y; indicePuntoMasAlto = i;}
             }
 
-            // Inicializar o limpiar el panel dinámico HUD
             if (datosPerfil.length > 0) {
                 puntoMasAlto = datosPerfil[indicePuntoMasAlto];
                 document.getElementById('hud-ruta').style.display = 'block';
-                actualizarHudPuntoAlto(0); // Muestra datos iniciales desde el km 0
+                actualizarHudPuntoAlto(0);
             } else {
                 puntoMasAlto = null;
                 document.getElementById('hud-ruta').style.display = 'none';
@@ -396,32 +428,37 @@
             inicializarGrafico();
         }
 
-        // NUEVA FUNCIÓN: Actualiza el componente HUD con la distancia y altitud restante
+        // Distribución horizontal optimizada para el HUD inferior central
         function actualizarHudPuntoAlto(indiceActual) {
             if (!puntoMasAlto) return;
             const elHud = document.getElementById('hud-ruta');
             const puntoRuta = datosPerfil[indiceActual];
             
             if (indiceActual <= indicePuntoMasAlto) {
-                // El usuario está antes de llegar a la cumbre
                 const distRestante = puntoMasAlto.x - puntoRuta.x;
                 const altRestante = puntoMasAlto.y - puntoRuta.y;
                 
                 elHud.innerHTML = `
-                    <div style="font-weight: 600; color: #007aff; margin-bottom: 2px;">Al punto más alto:</div>
-                    <div>Distancia: <b>${distRestante.toFixed(2)} km</b></div>
-                    <div>Desnivel: <b>+${altRestante} m</b></div>
-                    <div style="font-size: 11px; color: #666; margin-top: 5px; border-top: 1px solid #ddd; padding-top:3px;">Alt. Máx: ${puntoMasAlto.y}m</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                        <span style="font-weight: 600; color: #007aff;">Al punto más alto:</span>
+                        <span style="font-size: 11px; color: #666; background: rgba(0,122,255,0.08); padding: 2px 6px; border-radius: 10px;">Cumbre: ${puntoMasAlto.y}m</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 13.5px;">
+                        <div>Distancia: <b>${distRestante.toFixed(2)} km</b></div>
+                        <div>Faltan: <b>+${altRestante} m</b></div>
+                    </div>
                 `;
             } else {
-                // El usuario ya ha sobrepasado la cumbre
                 const distPasada = puntoRuta.x - puntoMasAlto.x;
                 
                 elHud.innerHTML = `
-                    <div style="font-weight: 600; color: #4cd964; margin-bottom: 2px;">Punto más alto:</div>
-                    <div style="font-weight: bold; color: #4cd964;">¡Superado! 🎉</div>
-                    <div style="font-size: 12px; color: #444;">Hace ${distPasada.toFixed(2)} km</div>
-                    <div style="font-size: 11px; color: #666; margin-top: 5px; border-top: 1px solid #ddd; padding-top:3px;">Alt. Máx: ${puntoMasAlto.y}m</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span style="font-weight: 600; color: #4cd964;">Punto más alto:</span>
+                            <span style="font-weight: bold; color: #4cd964; margin-left: 4px;">¡Superado! 🎉</span>
+                        </div>
+                        <div style="font-size: 11.5px; color: #555;">Hace ${distPasada.toFixed(2)} km</div>
+                    </div>
                 `;
             }
         }
@@ -434,19 +471,19 @@
                 data: {
                     datasets: [{
                         label: 'Perfil (m)', data: datosPerfil,
-                        borderColor: '#007aff', backgroundColor: 'rgba(0, 122, 255, 0.12)',
+                        borderColor: '#007aff', backgroundColor: 'rgba(0, 122, 255, 0.1)',
                         borderWidth: 2, fill: true, pointRadius: 0, tension: 0.1
                     }, {
                         label: 'Tú', data: [], 
                         borderColor: '#ff3b30', backgroundColor: '#ff3b30',
-                        pointRadius: 7, pointHoverRadius: 7, showLine: false
+                        pointRadius: 6, pointHoverRadius: 6, showLine: false
                     }]
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false,
                     scales: {
                         x: { type: 'linear', grid: { display: false } },
-                        y: { grid: { color: 'rgba(0,0,0,0.05)' } }
+                        y: { grid: { color: 'rgba(0,0,0,0.04)' } }
                     },
                     plugins: { legend: { display: false } }
                 }
@@ -479,7 +516,6 @@
             miGrafico.data.datasets[1].data = [{ x: puntoRuta.x, y: puntoRuta.y }];
             miGrafico.update('none'); 
 
-            // ENLACE DINÁMICO: Actualizar los datos del HUD según avanza el GPS
             actualizarHudPuntoAlto(indiceMasCercano);
         }
 
