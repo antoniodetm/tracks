@@ -18,10 +18,19 @@
         }
         #map { height: 100%; width: 100%; }
         
-        /* Panel de botones estilo iOS */
+        /* Panel de botones estilo iOS - Ahora en la parte inferior horizontal */
         .panel-botones {
-            position: absolute; bottom: 30px; right: 20px; z-index: 10;
-            display: flex; flex-direction: column; gap: 15px;
+            position: absolute; 
+            bottom: calc(20px + env(safe-area-inset-bottom, 0px)); /* Optimizado para el "notch" de dispositivos móviles */
+            left: 50%;
+            transform: translateX(-50%); /* Centrado horizontal perfecto */
+            z-index: 10;
+            display: flex; 
+            flex-direction: row; /* Alineación horizontal */
+            gap: 12px; /* Espacio entre botones reducidos para encajar mejor en pantallas estrechas */
+            justify-content: center;
+            align-items: center;
+            width: max-content; /* Ajustado al tamaño de los botones */
         }
         .btn-ios {
             background: rgba(255, 255, 255, 0.95); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
@@ -241,42 +250,35 @@
             reader.readAsText(file);
         });
 
-        // NUEVO: Lector e inyector de mapas locales PMTiles
+        // Lector e inyector de mapas locales PMTiles
         document.getElementById('map-input').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
 
-            // Instanciar el lector de PMTiles usando un Blob directo del teléfono
             const blobSource = new pmtiles.BlobSource(file);
             const p = new pmtiles.PMTiles(blobSource);
-            protocol.add(p); // Añadir el mapa al bus de MapLibre
+            protocol.add(p); 
 
             p.getHeader().then(header => {
-                // Limpiar cualquier mapa offline cargado previamente para no saturar memoria
                 if (map.getLayer('capa-offline')) map.removeLayer('capa-offline');
                 if (map.getSource('fuente-offline')) map.removeSource('fuente-offline');
 
-                // Ocultar las capas online para ver el mapa offline puro
                 map.setLayoutProperty('topo-layer', 'visibility', 'none');
                 map.setLayoutProperty('sat-layer', 'visibility', 'none');
 
-                // Comprobar tipo de archivo (tileType 1 = Vectorial, 2,3,4 = Ráster imágenes)
                 if (header.tileType === 1) {
-                    // Si es vectorial (MVT), se inyecta como fuente de vectores
                     map.addSource('fuente-offline', {
                         type: 'vector',
                         url: `pmtiles://${p.url}`
                     });
-                    // Para ver líneas básicas en mapas vectoriales sin un JSON de estilos pesado
                     map.addLayer({
                         id: 'capa-offline',
                         type: 'line',
                         source: 'fuente-offline',
-                        'source-layer': 'basemap', // Nombre por defecto común en Protomaps vector
+                        'source-layer': 'basemap', 
                         paint: { 'line-color': '#757575', 'line-width': 1.5 }
                     }, map.getLayer('ruta-linea') ? 'ruta-linea' : undefined);
                 } else {
-                    // Si es Ráster (Imágenes Topográficas offline), es directo e ideal
                     map.addSource('fuente-offline', {
                         type: 'raster',
                         url: `pmtiles://${p.url}`,
@@ -289,10 +291,8 @@
                     }, map.getLayer('ruta-linea') ? 'ruta-linea' : undefined);
                 }
 
-                // Cambiar estilo visual del botón para indicar éxito
                 document.getElementById('label-mapa').classList.add('btn-activo');
 
-                // Encuadrar la cámara automáticamente en las coordenadas exactas de este mapa cargado
                 if (header.minLon !== undefined) {
                     map.fitBounds([header.minLon, header.minLat, header.maxLon, header.maxLat], { padding: 40 });
                 }
