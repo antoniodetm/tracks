@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gps-orientado-v1';
+const CACHE_NAME = 'gps-orientado-v2';
 
 // Archivos críticos que la app necesita clonar para correr 100% offline
 const ASSETS_TO_CACHE = [
