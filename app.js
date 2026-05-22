@@ -11,6 +11,9 @@ let datosPerfil = [];
 let miGrafico = null;
 let ultimoIndiceCercano = 0; 
 
+let puntoMasAlto = null;
+let indicePuntoMasAlto = 0;
+
 const mapaBaseEstilo = {
     "version": 8,
     "sources": {
@@ -260,6 +263,8 @@ function procesarAltimetria(xml) {
     const trkpts = xml.getElementsByTagName("trkpt");
     datosPerfil = [];
     let distanciaAcumulada = 0;
+    let maxAltitud = -Infinity;
+    indicePuntoMasAlto = 0;
 
     for (let i = 0; i < trkpts.length; i++) {
         const lat = parseFloat(trkpts[i].getAttribute("lat"));
@@ -273,13 +278,65 @@ function procesarAltimetria(xml) {
             distanciaAcumulada += calcularDistanciaKms(lonPrev, latPrev, lon, lat);
         }
 
-        datosPerfil.push({
+        const punto = {
             x: parseFloat(distanciaAcumulada.toFixed(2)), 
             y: Math.round(altitud),                      
             lat: lat, lon: lon
-        });
+        };
+
+        datosPerfil.push(punto);
+
+        if (punto.y > maxAltitud) {
+            maxAltitud = punto.y; 
+            indicePuntoMasAlto = i;
+        }
     }
+
+    if (datosPerfil.length > 0) {
+        puntoMasAlto = datosPerfil[indicePuntoMasAlto];
+        document.getElementById('hud-ruta').style.display = 'block';
+        actualizarHudPuntoAlto(0);
+    } else {
+        puntoMasAlto = null;
+        document.getElementById('hud-ruta').style.display = 'none';
+    }
+
     inicializarGrafico();
+}
+
+// Distribución horizontal optimizada para el HUD inferior central
+function actualizarHudPuntoAlto(indiceActual) {
+    if (!puntoMasAlto) return;
+    const elHud = document.getElementById('hud-ruta');
+    const puntoRuta = datosPerfil[indiceActual];
+    
+    if (indiceActual <= indicePuntoMasAlto) {
+        const distRestante = puntoMasAlto.x - puntoRuta.x;
+        const altRestante = puntoMasAlto.y - puntoRuta.y;
+        
+        elHud.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                <span style="font-weight: 600; color: #007aff;">Al punto más alto:</span>
+                <span style="font-size: 11px; color: #666; background: rgba(0,122,255,0.08); padding: 2px 6px; border-radius: 10px;">Cumbre: ${puntoMasAlto.y}m</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13.5px;">
+                <div>Distancia: <b>${distRestante.toFixed(2)} km</b></div>
+                <div>Faltan: <b>+${altRestante} m</b></div>
+            </div>
+        `;
+    } else {
+        const distPasada = puntoRuta.x - puntoMasAlto.x;
+        
+        elHud.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <span style="font-weight: 600; color: #4cd964;">Punto más alto:</span>
+                    <span style="font-weight: bold; color: #4cd964; margin-left: 4px;">¡Superado! 🎉</span>
+                </div>
+                <div style="font-size: 11.5px; color: #555;">Hace ${distPasada.toFixed(2)} km</div>
+            </div>
+        `;
+    }
 }
 
 function inicializarGrafico() {
@@ -334,6 +391,8 @@ function actualizarPuntoGrafico(coordsGPS) {
     const puntoRuta = datosPerfil[indiceMasCercano];
     miGrafico.data.datasets[1].data = [{ x: puntoRuta.x, y: puntoRuta.y }];
     miGrafico.update('none'); 
+
+    actualizarHudPuntoAlto(indiceMasCercano);
 }
 
 // Registro del Service Worker para soporte offline
