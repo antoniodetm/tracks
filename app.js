@@ -309,7 +309,7 @@ function dibujarRuta(geoJsonData) {
     map.addLayer({
         'id': 'ruta-linea', 'type': 'line', 'source': 'ruta',
         'layout': { 'line-join': 'round', 'line-cap': 'round' },
-        'paint': { 'line-color': '#0055ff', 'line-width': 6, 'line-opacity': 0.85 }
+        'paint': { 'line-color': '#3b82f6', 'line-width': 5, 'line-opacity': 0.9 }
     });
 }
 
@@ -378,27 +378,24 @@ function actualizarHudPuntoAlto(indiceActual) {
         const altRestante = puntoMasAlto.y - puntoRuta.y;
         
         elHud.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-                <span style="font-weight: 600; color: #007aff;">Al punto más alto:</span>
-                <span style="font-size: 11px; color: #666; background: rgba(0,122,255,0.08); padding: 2px 6px; border-radius: 10px;">Cumbre: ${puntoMasAlto.y}m</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; font-size: 13.5px;">
-                <div>Distancia: <b>${distRestante.toFixed(2)} km</b></div>
-                <div>Faltan: <b>+${altRestante} m</b></div>
-            </div>
-        `;
+            <div style="display: flex; flex-direction: column; gap: 4px; font-family: system-ui, -apple-system, sans-serif;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; opacity: 0.6; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">
+                    <span>Siguiente Cima</span>
+                    <span>${puntoMasAlto.y} m</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                    <span style="font-size: 18px; font-weight: 300;">${distRestante.toFixed(2)}<small style="font-size: 11px; font-weight: 400; margin-left: 2px; color: #888;">km</small></span>
+                    <span style="font-size: 18px; font-weight: 300; color: #007aff;">+${altRestante}<small style="font-size: 11px; font-weight: 400; margin-left: 2px;">m</small></span>
+                </div>
+            </div>`;
     } else {
         const distPasada = puntoRuta.x - puntoMasAlto.x;
         
         elHud.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <span style="font-weight: 600; color: #4cd964;">Punto más alto:</span>
-                    <span style="font-weight: bold; color: #4cd964; margin-left: 4px;">¡Superado! 🎉</span>
-                </div>
-                <div style="font-size: 11.5px; color: #555;">Hace ${distPasada.toFixed(2)} km</div>
-            </div>
-        `;
+            <div style="display: flex; justify-content: space-between; align-items: center; font-family: system-ui, sans-serif;">
+                <span style="font-size: 12px; font-weight: 600; color: #10b981; text-transform: uppercase; letter-spacing: 0.03em;">Cima Alcanzada</span>
+                <span style="font-size: 11px; color: #888; font-weight: 500;">Hace ${distPasada.toFixed(2)} km</span>
+            </div>`;
     }
 }
 
@@ -410,8 +407,8 @@ function inicializarGrafico() {
         data: {
             datasets: [{
                 label: 'Perfil (m)', data: datosPerfil,
-                borderColor: '#007aff', backgroundColor: 'rgba(0, 122, 255, 0.12)',
-                borderWidth: 2, fill: true, pointRadius: 0, tension: 0.1
+                borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                borderWidth: 1.5, fill: true, pointRadius: 0, tension: 0.2
             }, {
                 label: 'Tú', data: [], 
                 borderColor: '#ff3b30', backgroundColor: '#ff3b30',
