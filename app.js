@@ -2,13 +2,14 @@
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
-let capaActual = 'topo';
+let capaActual = 'topo'; // Puede ser 'topo', 'sat', 'osm' o 'offline'
 let coordenadasUsuario = null;
 let rumboActual = 0;
 let modoSeguimiento = 0; 
 let gpxGeojsonData = null; 
 let datosPerfil = []; 
 let miGrafico = null;
+let modoOffline = false;
 let ultimoIndiceCercano = 0; 
 
 let puntoMasAlto = null;
@@ -28,11 +29,18 @@ const mapaBaseEstilo = {
             "tiles": ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
             "tileSize": 256,
             "attribution": "© Esri"
+        },
+        "osm-source": {
+            "type": "raster",
+            "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            "tileSize": 256,
+            "attribution": "© OpenStreetMap"
         }
     },
     "layers": [
         { "id": "sat-layer", "type": "raster", "source": "sat-source", "layout": { "visibility": "none" } },
-        { "id": "topo-layer", "type": "raster", "source": "topo-source", "layout": { "visibility": "visible" } }
+        { "id": "topo-layer", "type": "raster", "source": "topo-source", "layout": { "visibility": "visible" } },
+        { "id": "osm-layer", "type": "raster", "source": "osm-source", "layout": { "visibility": "none" } }
     ]
 };
 
@@ -55,17 +63,70 @@ map.on('load', () => {
 });
 
 function alternarCapa() {
+    const tieneOffline = !!map.getSource('fuente-offline');
+    
+    // Ocultamos todas las capas base primero
+    map.setLayoutProperty('topo-layer', 'visibility', 'none');
+    map.setLayoutProperty('sat-layer', 'visibility', 'none');
+    map.setLayoutProperty('osm-layer', 'visibility', 'none');
+    if (map.getLayer('capa-offline')) map.setLayoutProperty('capa-offline', 'visibility', 'none');
+
     if (capaActual === 'topo') {
-        map.setLayoutProperty('topo-layer', 'visibility', 'none');
         map.setLayoutProperty('sat-layer', 'visibility', 'visible');
         capaActual = 'sat';
         document.getElementById('btn-capa').innerText = '🛰️';
+        modoOffline = false;
+    } else if (capaActual === 'sat') {
+        map.setLayoutProperty('osm-layer', 'visibility', 'visible');
+        capaActual = 'osm';
+        document.getElementById('btn-capa').innerText = '🗺️';
+        modoOffline = false;
+    } else if (capaActual === 'osm') {
+        if (tieneOffline) {
+            activarModoOffline();
+        } else {
+            map.setLayoutProperty('topo-layer', 'visibility', 'visible');
+            capaActual = 'topo';
+            document.getElementById('btn-capa').innerText = '⛰️';
+            modoOffline = false;
+        }
     } else {
-        map.setLayoutProperty('sat-layer', 'visibility', 'none');
+        // Venimos de 'offline', volvemos a empezar el ciclo
         map.setLayoutProperty('topo-layer', 'visibility', 'visible');
         capaActual = 'topo';
         document.getElementById('btn-capa').innerText = '⛰️';
+        desactivarModoOffline();
     }
+}
+
+/**
+ * Alterna la visibilidad entre el mapa offline cargado (PMTiles) y los mapas online.
+ */
+function alternarModoOffline() {
+    if (!map.getSource('fuente-offline')) {
+        alert("Primero selecciona un archivo de mapa (.pmtiles)");
+        return;
+    }
+    if (modoOffline) desactivarModoOffline();
+    else activarModoOffline();
+}
+
+function activarModoOffline() {
+    modoOffline = true;
+    capaActual = 'offline';
+    map.setLayoutProperty('topo-layer', 'visibility', 'none');
+    map.setLayoutProperty('sat-layer', 'visibility', 'none');
+    map.setLayoutProperty('osm-layer', 'visibility', 'none');
+    if (map.getLayer('capa-offline')) map.setLayoutProperty('capa-offline', 'visibility', 'visible');
+    document.getElementById('label-mapa').classList.add('btn-activo');
+    document.getElementById('btn-capa').innerText = '📁';
+}
+
+function desactivarModoOffline() {
+    modoOffline = false;
+    // La visibilidad se gestiona ahora principalmente en alternarCapa para evitar conflictos
+    if (map.getLayer('capa-offline')) map.setLayoutProperty('capa-offline', 'visibility', 'none');
+    document.getElementById('label-mapa').classList.remove('btn-activo');
 }
 
 function alternarPanelAltitud() {
@@ -197,12 +258,15 @@ document.getElementById('map-input').addEventListener('change', function(e) {
     const p = new pmtiles.PMTiles(blobSource);
     protocol.add(p); 
 
+    console.log("Intentando cargar PMTiles:", file.name);
+
     p.getHeader().then(header => {
+        console.log("✅ PMTiles cargado correctamente:", header);
+        
         if (map.getLayer('capa-offline')) map.removeLayer('capa-offline');
         if (map.getSource('fuente-offline')) map.removeSource('fuente-offline');
 
-        map.setLayoutProperty('topo-layer', 'visibility', 'none');
-        map.setLayoutProperty('sat-layer', 'visibility', 'none');
+        activarModoOffline();
 
         if (header.tileType === 1) {
             map.addSource('fuente-offline', {
@@ -229,12 +293,11 @@ document.getElementById('map-input').addEventListener('change', function(e) {
             }, map.getLayer('ruta-linea') ? 'ruta-linea' : undefined);
         }
 
-        document.getElementById('label-mapa').classList.add('btn-activo');
-
         if (header.minLon !== undefined) {
             map.fitBounds([header.minLon, header.minLat, header.maxLon, header.maxLat], { padding: 40 });
         }
     }).catch(err => {
+        console.error("❌ Error al cargar PMTiles:", err);
         alert("Error leyendo el mapa PMTiles: " + err.message);
     });
 });
@@ -352,7 +415,11 @@ function inicializarGrafico() {
             }, {
                 label: 'Tú', data: [], 
                 borderColor: '#ff3b30', backgroundColor: '#ff3b30',
-                pointRadius: 7, pointHoverRadius: 7, showLine: false
+                pointRadius: 8, 
+                pointHoverRadius: 8, 
+                showLine: false,
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2
             }]
         },
         options: {
@@ -387,12 +454,18 @@ function actualizarPuntoGrafico(coordsGPS) {
         }
     }
 
+    // Guardamos el índice real para optimizar la búsqueda en el siguiente tick del GPS
     ultimoIndiceCercano = indiceMasCercano;
-    const puntoRuta = datosPerfil[indiceMasCercano];
+
+    // Si la distancia al punto más cercano es mayor a ~250m (aprox 0.0025 grados),
+    // forzamos la posición al inicio del perfil (índice 0).
+    let indiceAMostrar = indiceMasCercano;
+    if (distanciaMinima > 0.00000625) { indiceAMostrar = 0; }
+
+    const puntoRuta = datosPerfil[indiceAMostrar];
     miGrafico.data.datasets[1].data = [{ x: puntoRuta.x, y: puntoRuta.y }];
     miGrafico.update('none'); 
-
-    actualizarHudPuntoAlto(indiceMasCercano);
+    actualizarHudPuntoAlto(indiceAMostrar);
 }
 
 // Registro del Service Worker para soporte offline
