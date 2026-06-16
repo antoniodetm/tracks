@@ -326,6 +326,8 @@ function procesarAltimetria(xml) {
     const trkpts = xml.getElementsByTagName("trkpt");
     datosPerfil = [];
     let distanciaAcumulada = 0;
+    let gainAcumulado = 0;
+    let lossAcumulado = 0;
     let maxAltitud = -Infinity;
     indicePuntoMasAlto = 0;
 
@@ -333,17 +335,23 @@ function procesarAltimetria(xml) {
         const lat = parseFloat(trkpts[i].getAttribute("lat"));
         const lon = parseFloat(trkpts[i].getAttribute("lon"));
         const eleNode = trkpts[i].getElementsByTagName("ele")[0];
-        const altitud = eleNode ? parseFloat(eleNode.textContent) : 0;
+        const altitud = eleNode ? Math.round(parseFloat(eleNode.textContent)) : 0;
 
         if (i > 0) {
             const latPrev = parseFloat(trkpts[i-1].getAttribute("lat"));
             const lonPrev = parseFloat(trkpts[i-1].getAttribute("lon"));
             distanciaAcumulada += calcularDistanciaKms(lonPrev, latPrev, lon, lat);
+            
+            const diff = altitud - datosPerfil[i-1].y;
+            if (diff > 0) gainAcumulado += diff;
+            else lossAcumulado += Math.abs(diff);
         }
 
         const punto = {
-            x: parseFloat(distanciaAcumulada.toFixed(2)), 
-            y: Math.round(altitud),                      
+            x: parseFloat(distanciaAcumulada.toFixed(2)),
+            y: altitud,
+            gain: gainAcumulado,
+            loss: lossAcumulado,
             lat: lat, lon: lon
         };
 
@@ -367,34 +375,26 @@ function procesarAltimetria(xml) {
     inicializarGrafico();
 }
 
-// Distribución horizontal optimizada para el HUD inferior central
 function actualizarHudPuntoAlto(indiceActual) {
-    if (!puntoMasAlto) return;
+    if (!datosPerfil.length || !puntoMasAlto) return;
     const elHud = document.getElementById('hud-ruta');
     const puntoRuta = datosPerfil[indiceActual];
-    
+
     if (indiceActual <= indicePuntoMasAlto) {
-        const distRestante = puntoMasAlto.x - puntoRuta.x;
-        const altRestante = puntoMasAlto.y - puntoRuta.y;
-        
+        const distCima = Math.max(0, puntoMasAlto.x - puntoRuta.x);
+        const altCima = Math.max(0, puntoMasAlto.y - puntoRuta.y);
         elHud.innerHTML = `
-            <div style="display: flex; flex-direction: column; gap: 4px; font-family: system-ui, -apple-system, sans-serif;">
-                <div style="display: flex; justify-content: space-between; align-items: baseline; opacity: 0.6; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">
-                    <span>Siguiente Cima</span>
-                    <span>${puntoMasAlto.y} m</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: baseline;">
-                    <span style="font-size: 18px; font-weight: 300;">${distRestante.toFixed(2)}<small style="font-size: 11px; font-weight: 400; margin-left: 2px; color: #888;">km</small></span>
-                    <span style="font-size: 18px; font-weight: 300; color: #007aff;">+${altRestante}<small style="font-size: 11px; font-weight: 400; margin-left: 2px;">m</small></span>
+            <div style="width: 100%; font-family: system-ui, -apple-system, sans-serif; text-align: center;">
+                <div style="opacity: 0.6; font-size: 10px; font-weight: 700; text-transform: uppercase; margin-bottom: 2px;">Distancia y Desnivel a Cima (${puntoMasAlto.y}m)</div>
+                <div style="display: flex; justify-content: center; align-items: baseline; gap: 20px;">
+                    <span style="font-size: 20px; font-weight: 700;">${distCima.toFixed(2)}<small style="font-size: 12px; color: #888; font-weight: 400; margin-left: 2px;">km</small></span>
+                    <span style="font-size: 20px; font-weight: 700; color: #007aff;">+${altCima}<small style="font-size: 12px; color: #007aff; font-weight: 400; margin-left: 2px;">m</small></span>
                 </div>
             </div>`;
     } else {
-        const distPasada = puntoRuta.x - puntoMasAlto.x;
-        
         elHud.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; font-family: system-ui, sans-serif;">
-                <span style="font-size: 12px; font-weight: 600; color: #10b981; text-transform: uppercase; letter-spacing: 0.03em;">Cima Alcanzada</span>
-                <span style="font-size: 11px; color: #888; font-weight: 500;">Hace ${distPasada.toFixed(2)} km</span>
+            <div style="width: 100%; text-align: center; color: #10b981; font-size: 12px; font-weight: 800; font-family: system-ui, sans-serif;">
+                🏁 CIMA SUPERADA
             </div>`;
     }
 }
@@ -404,6 +404,36 @@ function inicializarGrafico() {
     const ctx = document.getElementById('graficoAltitud').getContext('2d');
     miGrafico = new Chart(ctx, {
         type: 'line',
+        plugins: [{
+            id: 'labelPosicionActual',
+            afterDatasetsDraw(chart) {
+                const { ctx, data } = chart;
+                const dsUsuario = data.datasets[1];
+                if (!dsUsuario.data || dsUsuario.data.length === 0 || !datosPerfil.length) return;
+                
+                const metaPoint = chart.getDatasetMeta(1).data[0];
+                if (!metaPoint) return;
+
+                const totalDist = datosPerfil[datosPerfil.length - 1].x;
+                const recorrido = dsUsuario.data[0].x.toFixed(2);
+                const falta = Math.max(0, totalDist - dsUsuario.data[0].x).toFixed(2);
+                const texto = `${recorrido}km / -${falta}km`;
+
+                ctx.save();
+                ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+                const textWidth = ctx.measureText(texto).width;
+                
+                let xPos = metaPoint.x + 12;
+                // Si la etiqueta se sale por la derecha, la dibujamos a la izquierda del punto
+                if (xPos + textWidth > chart.width) xPos = metaPoint.x - textWidth - 12;
+
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+                ctx.fillRect(xPos - 4, metaPoint.y - 18, textWidth + 8, 16);
+                ctx.fillStyle = '#ff3b30';
+                ctx.fillText(texto, xPos, metaPoint.y - 6);
+                ctx.restore();
+            }
+        }],
         data: {
             datasets: [{
                 label: 'Perfil (m)', data: datosPerfil,
