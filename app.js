@@ -5,12 +5,12 @@ maplibregl.addProtocol("pmtiles", protocol.tile);
 let capaActual = 'topo'; // Puede ser 'topo', 'sat', 'osm' o 'offline'
 let coordenadasUsuario = null;
 let rumboActual = 0;
-let modoSeguimiento = 0; 
-let gpxGeojsonData = null; 
-let datosPerfil = []; 
+let modoSeguimiento = 0;
+let gpxGeojsonData = null;
+let datosPerfil = [];
 let miGrafico = null;
 let modoOffline = false;
-let ultimoIndiceCercano = 0; 
+let ultimoIndiceCercano = 0;
 
 let puntoMasAlto = null;
 let indicePuntoMasAlto = 0;
@@ -55,6 +55,17 @@ const map = new maplibregl.Map({
 const elFlecha = document.createElement('div');
 elFlecha.className = 'gpx-flecha-usuario';
 
+// Marcador de seguimiento (se mueve cuando el usuario pasa el dedo/ratón por el perfil)
+const elSeguimiento = document.createElement('div');
+elSeguimiento.style.width = '14px';
+elSeguimiento.style.height = '14px';
+elSeguimiento.style.borderRadius = '50%';
+elSeguimiento.style.backgroundColor = '#fff';
+elSeguimiento.style.border = '3px solid #3b82f6';
+elSeguimiento.style.boxShadow = '0 0 8px rgba(0,0,0,0.3)';
+elSeguimiento.style.display = 'none';
+const marcadorSeguimiento = new maplibregl.Marker({ element: elSeguimiento }).setLngLat([0, 0]).addTo(map);
+
 // OPTIMIZACIÓN IPHONE: Se usa 'viewport' para evitar el retraso o salto de transformación en iOS Safari
 const marcadorUsuario = new maplibregl.Marker({ element: elFlecha, rotationAlignment: 'viewport' }).setLngLat([0, 0]);
 
@@ -64,7 +75,7 @@ map.on('load', () => {
 
 function alternarCapa() {
     const tieneOffline = !!map.getSource('fuente-offline');
-    
+
     // Ocultamos todas las capas base primero
     map.setLayoutProperty('topo-layer', 'visibility', 'none');
     map.setLayoutProperty('sat-layer', 'visibility', 'none');
@@ -134,7 +145,7 @@ function alternarPanelAltitud() {
     const btn = document.getElementById('btn-altitud');
     panel.classList.toggle('abierto');
     btn.classList.toggle('btn-activo');
-    setTimeout(() => { if(miGrafico) miGrafico.resize(); }, 150);
+    setTimeout(() => { if (miGrafico) miGrafico.resize(); }, 150);
 }
 
 function conmutarModoSeguimiento() {
@@ -142,7 +153,7 @@ function conmutarModoSeguimiento() {
     const btn = document.getElementById('btn-brujula');
     if (modoSeguimiento === 0) {
         btn.innerText = "🧭"; btn.classList.remove('btn-activo');
-        map.setBearing(0); map.setPitch(0); 
+        map.setBearing(0); map.setPitch(0);
         actualizarOrientacion();
     } else if (modoSeguimiento === 1) {
         btn.innerText = "📍"; btn.classList.add('btn-activo');
@@ -152,11 +163,11 @@ function conmutarModoSeguimiento() {
     } else if (modoSeguimiento === 2) {
         btn.innerText = "🏃‍♂️"; btn.classList.add('btn-activo');
         map.setPitch(45);
-        solicitarPermisoOrientacion(); 
+        solicitarPermisoOrientacion();
     }
 }
 
-navigator.geolocation.watchPosition(function(pos) {
+navigator.geolocation.watchPosition(function (pos) {
     coordenadasUsuario = [pos.coords.longitude, pos.coords.latitude];
     marcadorUsuario.setLngLat(coordenadasUsuario);
 
@@ -172,7 +183,7 @@ navigator.geolocation.watchPosition(function(pos) {
     if (datosPerfil.length > 0) {
         actualizarPuntoGrafico(coordenadasUsuario);
     }
-}, function(err) { console.error(err); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
+}, function (err) { console.error(err); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
 
 function solicitarPermisoOrientacion() {
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -198,7 +209,7 @@ function manejarOrientacion(event) {
 
     if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
         rumbo = event.webkitCompassHeading; // Rumbo nativo de brújula calibrada en iOS
-    } 
+    }
     else if (event.alpha !== undefined && event.alpha !== null) {
         if (event.absolute === true || event.type === 'deviceorientationabsolute') {
             rumbo = 360 - event.alpha;
@@ -229,15 +240,15 @@ map.on('rotate', () => {
 });
 
 // Lector de archivos GPX
-document.getElementById('file-input').addEventListener('change', function(e) {
+document.getElementById('file-input').addEventListener('change', function (e) {
     const file = e.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = function(evt) {
+    reader.onload = function (evt) {
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(evt.target.result, "text/xml");
-        gpxGeojsonData = toGeoJSON.gpx(xmlDoc); 
+        gpxGeojsonData = toGeoJSON.gpx(xmlDoc);
         dibujarRuta(gpxGeojsonData);
         procesarAltimetria(xmlDoc);
         ultimoIndiceCercano = 0;
@@ -250,19 +261,19 @@ document.getElementById('file-input').addEventListener('change', function(e) {
 });
 
 // Lector e inyector de mapas locales PMTiles
-document.getElementById('map-input').addEventListener('change', function(e) {
+document.getElementById('map-input').addEventListener('change', function (e) {
     const file = e.target.files[0];
     if (!file) return;
 
     const blobSource = new pmtiles.BlobSource(file);
     const p = new pmtiles.PMTiles(blobSource);
-    protocol.add(p); 
+    protocol.add(p);
 
     console.log("Intentando cargar PMTiles:", file.name);
 
     p.getHeader().then(header => {
         console.log("✅ PMTiles cargado correctamente:", header);
-        
+
         if (map.getLayer('capa-offline')) map.removeLayer('capa-offline');
         if (map.getSource('fuente-offline')) map.removeSource('fuente-offline');
 
@@ -277,7 +288,7 @@ document.getElementById('map-input').addEventListener('change', function(e) {
                 id: 'capa-offline',
                 type: 'line',
                 source: 'fuente-offline',
-                'source-layer': 'basemap', 
+                'source-layer': 'basemap',
                 paint: { 'line-color': '#757575', 'line-width': 1.5 }
             }, map.getLayer('ruta-linea') ? 'ruta-linea' : undefined);
         } else {
@@ -314,12 +325,12 @@ function dibujarRuta(geoJsonData) {
 }
 
 function calcularDistanciaKms(lon1, lat1, lon2, lat2) {
-    const R = 6371; 
+    const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function procesarAltimetria(xml) {
@@ -338,11 +349,11 @@ function procesarAltimetria(xml) {
         const altitud = eleNode ? Math.round(parseFloat(eleNode.textContent)) : 0;
 
         if (i > 0) {
-            const latPrev = parseFloat(trkpts[i-1].getAttribute("lat"));
-            const lonPrev = parseFloat(trkpts[i-1].getAttribute("lon"));
+            const latPrev = parseFloat(trkpts[i - 1].getAttribute("lat"));
+            const lonPrev = parseFloat(trkpts[i - 1].getAttribute("lon"));
             distanciaAcumulada += calcularDistanciaKms(lonPrev, latPrev, lon, lat);
-            
-            const diff = altitud - datosPerfil[i-1].y;
+
+            const diff = altitud - datosPerfil[i - 1].y;
             if (diff > 0) gainAcumulado += diff;
             else lossAcumulado += Math.abs(diff);
         }
@@ -358,7 +369,7 @@ function procesarAltimetria(xml) {
         datosPerfil.push(punto);
 
         if (punto.y > maxAltitud) {
-            maxAltitud = punto.y; 
+            maxAltitud = punto.y;
             indicePuntoMasAlto = i;
         }
     }
@@ -401,28 +412,52 @@ function actualizarHudPuntoAlto(indiceActual) {
 
 function inicializarGrafico() {
     if (miGrafico) miGrafico.destroy();
+
+    let yMin, yMax;
+    if (datosPerfil.length > 0) {
+        const alts = datosPerfil.map(p => p.y);
+        const min = Math.min(...alts);
+        const max = Math.max(...alts);
+        if (max - min < 100) {
+            const centro = (max + min) / 2;
+            yMin = centro - 50;
+            yMax = centro + 50;
+        }
+    }
+
     const ctx = document.getElementById('graficoAltitud').getContext('2d');
     miGrafico = new Chart(ctx, {
         type: 'line',
         plugins: [{
-            id: 'labelPosicionActual',
+            id: 'posicionActualDecoracion',
             afterDatasetsDraw(chart) {
-                const { ctx, data } = chart;
-                const dsUsuario = data.datasets[1];
-                if (!dsUsuario.data || dsUsuario.data.length === 0 || !datosPerfil.length) return;
-                
-                const metaPoint = chart.getDatasetMeta(1).data[0];
+                const { ctx, data, chartArea: { top, bottom } } = chart;
+                const dsPunto = data.datasets[2];
+                if (!dsPunto || !dsPunto.data || dsPunto.data.length === 0 || !datosPerfil.length) return;
+
+                const metaPoint = chart.getDatasetMeta(2).data[0];
                 if (!metaPoint) return;
 
+                // Dibujar línea vertical indicadora
+                ctx.save();
+                ctx.beginPath();
+                ctx.setLineDash([5, 5]);
+                ctx.moveTo(metaPoint.x, top);
+                ctx.lineTo(metaPoint.x, bottom);
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgba(255, 59, 48, 0.5)';
+                ctx.stroke();
+                ctx.restore();
+
                 const totalDist = datosPerfil[datosPerfil.length - 1].x;
-                const recorrido = dsUsuario.data[0].x.toFixed(2);
-                const falta = Math.max(0, totalDist - dsUsuario.data[0].x).toFixed(2);
+                const recorrido = dsPunto.data[0].x.toFixed(2);
+                const falta = Math.max(0, totalDist - dsPunto.data[0].x).toFixed(2);
                 const texto = `${recorrido}km / -${falta}km`;
 
                 ctx.save();
                 ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
                 const textWidth = ctx.measureText(texto).width;
-                
+
                 let xPos = metaPoint.x + 12;
                 // Si la etiqueta se sale por la derecha, la dibujamos a la izquierda del punto
                 if (xPos + textWidth > chart.width) xPos = metaPoint.x - textWidth - 12;
@@ -440,10 +475,14 @@ function inicializarGrafico() {
                 borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.08)',
                 borderWidth: 1.5, fill: true, pointRadius: 0, tension: 0.2
             }, {
-                label: 'Tú', data: [], 
+                label: 'Progreso', data: [],
+                borderColor: 'transparent', backgroundColor: 'rgba(59, 130, 246, 0.4)',
+                fill: true, pointRadius: 0, tension: 0.2
+            }, {
+                label: 'Tú', data: [],
                 borderColor: '#ff3b30', backgroundColor: '#ff3b30',
-                pointRadius: 8, 
-                pointHoverRadius: 8, 
+                pointRadius: 8,
+                pointHoverRadius: 8,
                 showLine: false,
                 pointBorderColor: '#fff',
                 pointBorderWidth: 2
@@ -451,9 +490,29 @@ function inicializarGrafico() {
         },
         options: {
             responsive: true, maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            onHover: (event, activeElements) => {
+                if (activeElements.length > 0) {
+                    const index = activeElements[0].index;
+                    const punto = datosPerfil[index];
+                    if (punto) {
+                        marcadorSeguimiento.setLngLat([punto.lon, punto.lat]);
+                        elSeguimiento.style.display = 'block';
+                    }
+                } else {
+                    elSeguimiento.style.display = 'none';
+                }
+            },
             scales: {
                 x: { type: 'linear', grid: { display: false } },
-                y: { grid: { color: 'rgba(0,0,0,0.05)' } }
+                y: {
+                    min: yMin,
+                    max: yMax,
+                    grid: { color: 'rgba(0,0,0,0.05)' }
+                }
             },
             plugins: { legend: { display: false } }
         }
@@ -490,16 +549,17 @@ function actualizarPuntoGrafico(coordsGPS) {
     if (distanciaMinima > 0.00000625) { indiceAMostrar = 0; }
 
     const puntoRuta = datosPerfil[indiceAMostrar];
-    miGrafico.data.datasets[1].data = [{ x: puntoRuta.x, y: puntoRuta.y }];
-    miGrafico.update('none'); 
+    miGrafico.data.datasets[1].data = datosPerfil.slice(0, indiceAMostrar + 1);
+    miGrafico.data.datasets[2].data = [{ x: puntoRuta.x, y: puntoRuta.y }];
+    miGrafico.update('none');
     actualizarHudPuntoAlto(indiceAMostrar);
 }
 
 // Registro del Service Worker para soporte offline
 if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => { 
+    window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')
             .then(() => console.log("Service Worker registrado con éxito"))
-            .catch((err) => console.error("SW Error:", err)); 
+            .catch((err) => console.error("SW Error:", err));
     });
 }
