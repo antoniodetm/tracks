@@ -85,12 +85,12 @@ function alternarCapa() {
     if (capaActual === 'topo') {
         map.setLayoutProperty('sat-layer', 'visibility', 'visible');
         capaActual = 'sat';
-        document.getElementById('btn-capa').innerText = '🛰️';
+        document.getElementById('btn-capa').innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7 9 3 5 7l4 4Z"/><path d="m17 11 4 4-4 4-4-4Z"/><path d="m4.5 15.5 2 2"/><path d="m15.5 4.5 2 2"/><path d="M2 12h2"/><path d="M12 2v2"/><path d="M20 12h2"/><path d="M12 20v2"/><path d="m17 7-5 5"/><path d="m7 17 5-5"/></svg>';
         modoOffline = false;
     } else if (capaActual === 'sat') {
         map.setLayoutProperty('osm-layer', 'visibility', 'visible');
         capaActual = 'osm';
-        document.getElementById('btn-capa').innerText = '🗺️';
+        document.getElementById('btn-capa').innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" x2="9" y1="3" y2="18"/><line x1="15" x2="15" y1="6" y2="21"/></svg>';
         modoOffline = false;
     } else if (capaActual === 'osm') {
         if (tieneOffline) {
@@ -98,14 +98,14 @@ function alternarCapa() {
         } else {
             map.setLayoutProperty('topo-layer', 'visibility', 'visible');
             capaActual = 'topo';
-            document.getElementById('btn-capa').innerText = '⛰️';
+            document.getElementById('btn-capa').innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>';
             modoOffline = false;
         }
     } else {
         // Venimos de 'offline', volvemos a empezar el ciclo
         map.setLayoutProperty('topo-layer', 'visibility', 'visible');
         capaActual = 'topo';
-        document.getElementById('btn-capa').innerText = '⛰️';
+        document.getElementById('btn-capa').innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>';
         desactivarModoOffline();
     }
 }
@@ -130,7 +130,7 @@ function activarModoOffline() {
     map.setLayoutProperty('osm-layer', 'visibility', 'none');
     if (map.getLayer('capa-offline')) map.setLayoutProperty('capa-offline', 'visibility', 'visible');
     document.getElementById('label-mapa').classList.add('btn-activo');
-    document.getElementById('btn-capa').innerText = '📁';
+    document.getElementById('btn-capa').innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 18h.01"/><path d="M10 18h.01"/><path d="M2 10V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4"/></svg>';
 }
 
 function desactivarModoOffline() {
@@ -152,16 +152,19 @@ function conmutarModoSeguimiento() {
     modoSeguimiento = (modoSeguimiento + 1) % 3;
     const btn = document.getElementById('btn-brujula');
     if (modoSeguimiento === 0) {
-        btn.innerText = "🧭"; btn.classList.remove('btn-activo');
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>';
+        btn.classList.remove('btn-activo');
         map.setBearing(0); map.setPitch(0);
         actualizarOrientacion();
     } else if (modoSeguimiento === 1) {
-        btn.innerText = "📍"; btn.classList.add('btn-activo');
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>';
+        btn.classList.add('btn-activo');
         map.setPitch(0);
         if (coordenadasUsuario) map.easeTo({ center: coordenadasUsuario, zoom: 16, duration: 800 });
         solicitarPermisoOrientacion(); // OPTIMIZACIÓN IPHONE: Solicita permiso aquí para activar la brújula desde ya
     } else if (modoSeguimiento === 2) {
-        btn.innerText = "🏃‍♂️"; btn.classList.add('btn-activo');
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>';
+        btn.classList.add('btn-activo');
         map.setPitch(45);
         solicitarPermisoOrientacion();
     }
@@ -404,8 +407,8 @@ function actualizarHudPuntoAlto(indiceActual) {
             </div>`;
     } else {
         elHud.innerHTML = `
-            <div style="width: 100%; text-align: center; color: #10b981; font-size: 12px; font-weight: 800; font-family: system-ui, sans-serif;">
-                🏁 CIMA SUPERADA
+            <div style="width: 100%; text-align: center; color: #10b981; font-size: 12px; font-weight: 800; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; gap: 5px;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> CIMA SUPERADA
             </div>`;
     }
 }
