@@ -546,11 +546,9 @@ function actualizarPuntoGrafico(coordsGPS) {
     // Guardamos el índice real para optimizar la búsqueda en el siguiente tick del GPS
     ultimoIndiceCercano = indiceMasCercano;
 
-    // Si la distancia al punto más cercano es mayor a ~250m (aprox 0.0025 grados),
-    // forzamos la posición al inicio del perfil (índice 0).
-    let indiceAMostrar = indiceMasCercano;
-    if (distanciaMinima > 0.00000625) { indiceAMostrar = 0; }
-
+    // Usamos siempre el índice más cercano encontrado para que la interfaz responda en vivo
+    // incluso si el usuario se separa ligeramente del track.
+    const indiceAMostrar = indiceMasCercano;
     const puntoRuta = datosPerfil[indiceAMostrar];
     miGrafico.data.datasets[1].data = datosPerfil.slice(0, indiceAMostrar + 1);
     miGrafico.data.datasets[2].data = [{ x: puntoRuta.x, y: puntoRuta.y }];
